@@ -1,0 +1,30 @@
+"""ORM models package.
+
+Importing every model here ensures they are registered on ``Base.metadata``
+so Alembic autogeneration can see them.
+"""
+
+from app.models.conversation import Conversation, Message
+from app.models.food_cache import FoodCache
+from app.models.knowledge import KnowledgeDocument, KnowledgeEmbedding
+from app.models.legal import LegalDocument, UserConsent
+from app.models.login_code import LoginCode
+from app.models.meal_log import MealLog
+from app.models.nutrition_profile import NutritionProfile
+from app.models.user import User
+from app.models.weight_log import WeightLog
+
+__all__ = [
+    "User",
+    "NutritionProfile",
+    "Conversation",
+    "Message",
+    "MealLog",
+    "WeightLog",
+    "KnowledgeDocument",
+    "KnowledgeEmbedding",
+    "FoodCache",
+    "LegalDocument",
+    "UserConsent",
+    "LoginCode",
+]

@@ -1,0 +1,110 @@
+# Production stack for a VPS. TLS is handled by Caddy (automatic Let's Encrypt).
+# Requires a .env file (see .env.prod.example) and DNS records for the domains
+# pointing to the VPS. Bring up with:
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nutribot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-nutribot}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutribot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    command:
+      - "--model-id"
+      - "BAAI/bge-m3"
+      - "--port"
+      - "80"
+      - "--max-batch-tokens"
+      - "4096"
+      - "--max-client-batch-size"
+      - "8"
+      - "--auto-truncate"
+    volumes:
+      - tei_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://nutribot:${POSTGRES_PASSWORD}@db:5432/nutribot}
+      EMBEDDINGS_URL: http://embeddings:80
+      CORS_ORIGINS: https://${APP_DOMAIN},https://${ADMIN_DOMAIN}
+      DASHBOARD_CLIENT_URL: https://${APP_DOMAIN}
+    depends_on:
+      db:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: http://backend:8000
+      DASHBOARD_CLIENT_URL: https://${APP_DOMAIN}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  dashboard-client:
+    build:
+      context: ./dashboard-client
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: https://${API_DOMAIN}/api/v1
+    restart: unless-stopped
+
+  dashboard-admin:
+    build:
+      context: ./dashboard-admin
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: https://${API_DOMAIN}/api/v1
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - dashboard-client
+      - dashboard-admin
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  tei_data:
+  caddy_data:
+  caddy_config:

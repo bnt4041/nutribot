@@ -1,0 +1,20 @@
+# Reverse proxy with automatic HTTPS (Let's Encrypt).
+# Domains and email come from environment variables (see docker-compose.prod.yml).
+{
+	email {$ACME_EMAIL}
+}
+
+# Client dashboard
+{$APP_DOMAIN} {
+	reverse_proxy dashboard-client:80
+}
+
+# Admin dashboard
+{$ADMIN_DOMAIN} {
+	reverse_proxy dashboard-admin:80
+}
+
+# Backend API
+{$API_DOMAIN} {
+	reverse_proxy backend:8000
+}

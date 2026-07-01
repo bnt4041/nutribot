@@ -1,0 +1,136 @@
+"""Conversation orchestration: persistence, RAG context, and DeepSeek call."""
+
+import logging
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
+from app.models.conversation import Conversation, Message
+from app.models.enums import MessageRole
+from app.models.nutrition_profile import NutritionProfile
+from app.models.user import User
+from app.services.deepseek.client import ChatResult, deepseek_client
+from app.services.deepseek.format import sanitize_for_telegram
+from app.services.deepseek.prompts import build_system_prompt
+from app.services.deepseek.tools import FOOD_TOOLS, make_food_tool_executor
+from app.services.rag.retrieval import build_context_block, retrieve
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+async def get_or_create_user(
+    db: AsyncSession, telegram_id: int, full_name: str | None
+) -> User:
+    """Return the user for this Telegram id, creating it on first contact."""
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(telegram_id=telegram_id, full_name=full_name)
+        db.add(user)
+        await db.flush()
+    elif full_name and user.full_name != full_name:
+        user.full_name = full_name
+    return user
+
+
+async def get_or_create_conversation(
+    db: AsyncSession, user: User, start_new: bool
+) -> Conversation:
+    """Reuse the user's latest conversation, or start a fresh one."""
+    if not start_new:
+        result = await db.execute(
+            select(Conversation)
+            .where(Conversation.user_id == user.id)
+            .order_by(Conversation.id.desc())
+            .limit(1)
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is not None:
+            return conversation
+
+    conversation = Conversation(user_id=user.id)
+    db.add(conversation)
+    await db.flush()
+    return conversation
+
+
+async def _load_history(
+    db: AsyncSession, conversation_id: int
+) -> list[dict[str, str]]:
+    """Load the most recent messages as OpenAI-format dicts (chronological)."""
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.id.desc())
+        .limit(settings.chat_history_limit)
+    )
+    recent = list(result.scalars().all())
+    recent.reverse()
+    return [{"role": m.role.value, "content": m.content} for m in recent]
+
+
+async def handle_message(
+    db: AsyncSession,
+    telegram_id: int,
+    text: str,
+    full_name: str | None = None,
+    start_new: bool = False,
+) -> tuple[int, str]:
+    """Full turn: persist user message, call DeepSeek, persist reply.
+
+    Returns (conversation_id, assistant_reply).
+    """
+    user = await get_or_create_user(db, telegram_id, full_name)
+    conversation = await get_or_create_conversation(db, user, start_new)
+
+    # Persist the incoming user message first so it is part of the history.
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            role=MessageRole.USER,
+            content=text,
+        )
+    )
+    await db.flush()
+
+    profile_result = await db.execute(
+        select(NutritionProfile).where(NutritionProfile.user_id == user.id)
+    )
+    profile = profile_result.scalar_one_or_none()
+
+    # RAG: retrieve relevant knowledge for this message and inject it as context.
+    system_prompt = build_system_prompt(profile)
+    try:
+        chunks = await retrieve(db, text)
+        context_block = build_context_block(chunks)
+        if context_block:
+            system_prompt += context_block
+    except Exception:  # noqa: BLE001 - retrieval must never break the chat
+        logger.exception("RAG retrieval failed; continuing without context")
+
+    history = await _load_history(db, conversation.id)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *history,
+    ]
+
+    tool_executor = make_food_tool_executor(db, user)
+    result: ChatResult = await deepseek_client.chat_with_tools(
+        messages, FOOD_TOOLS, tool_executor
+    )
+    reply = sanitize_for_telegram(result.content)
+
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            role=MessageRole.ASSISTANT,
+            content=reply,
+            tokens_prompt=result.tokens_prompt,
+            tokens_completion=result.tokens_completion,
+        )
+    )
+    await db.commit()
+
+    return conversation.id, reply

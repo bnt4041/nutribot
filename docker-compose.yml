@@ -1,0 +1,98 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nutribot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nutribot}
+      POSTGRES_DB: ${POSTGRES_DB:-nutribot}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutribot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  embeddings:
+    # Text Embeddings Inference serving bge-m3 (1024-dim). Downloads the model
+    # (~2GB) to the cached volume on first start.
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    # Modest batch limits keep CPU warmup memory in check; auto-truncate avoids
+    # errors on over-long inputs.
+    command:
+      - "--model-id"
+      - "BAAI/bge-m3"
+      - "--port"
+      - "80"
+      - "--max-batch-tokens"
+      - "4096"
+      - "--max-client-batch-size"
+      - "8"
+      - "--auto-truncate"
+    volumes:
+      - tei_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 300s
+
+  backend:
+    build: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://nutribot:nutribot@db:5432/nutribot}
+      EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://embeddings:80}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      embeddings:
+        condition: service_healthy
+    volumes:
+      - ./backend/app:/app/app  # hot-reload friendly mount for development
+    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  bot:
+    build: ./bot
+    env_file:
+      - .env
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  dashboard-client:
+    build: ./dashboard-client
+    environment:
+      # The browser calls the backend directly on the host-published port.
+      VITE_API_URL: ${VITE_CLIENT_API_URL:-http://localhost:8000/api/v1}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard-client:/app
+      - /app/node_modules  # keep container's installed deps
+    depends_on:
+      - backend
+
+  dashboard-admin:
+    build: ./dashboard-admin
+    environment:
+      VITE_API_URL: ${VITE_ADMIN_API_URL:-http://localhost:8000/api/v1}
+    ports:
+      - "5174:5174"
+    volumes:
+      - ./dashboard-admin:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  tei_data:
