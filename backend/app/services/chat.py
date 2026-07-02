@@ -138,3 +138,91 @@ async def handle_message(
     await db.commit()
 
     return conversation.id, reply
+
+
+FOOD_PHOTO_PROMPT = """Eres NutriBot, un asistente nutricional. Analiza esta foto de comida o bebida.
+
+Responde en español, en este formato exacto (sin Markdown, como texto de chat):
+
+📸 He visto:
+- [Nombre del plato/alimento principal]
+- Ingredientes que distingas: [lista breve]
+- Cantidad estimada: [aprox en gramos o unidades]
+- Calorías estimadas totales: [X] kcal
+- Proteína: [X]g · Carbs: [X]g · Grasa: [X]g
+
+Después, en un párrafo aparte, di si quieres que lo registre en tu diario. Si el usuario añadió un comentario con la foto (caption), tenlo en cuenta.
+
+Sé honesto si no puedes identificar bien algo — di "No estoy seguro" en ese caso. No inventes cifras demasiado precisas, usa rangos o aproximaciones."""
+
+
+async def handle_food_photo(
+    db: AsyncSession,
+    user: User,
+    image_base64: str,
+    image_mime: str,
+    caption: str | None = None,
+) -> tuple[int, str]:
+    """Analyze a food photo with vision AI and return the analysis.
+
+    Does NOT auto-log — the AI response invites the user to confirm.
+    Returns (conversation_id, assistant_reply).
+    """
+    conversation = Conversation(user_id=user.id)
+    db.add(conversation)
+    await db.flush()
+
+    # Build user message with image
+    user_text = caption or "¿Qué comida hay en esta foto? Analízala."
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            role=MessageRole.USER,
+            content=f"📸 [Foto de comida]{' — ' + caption if caption else ''}",
+        )
+    )
+    await db.flush()
+
+    # Call vision model
+    from app.services.deepseek.client import deepseek_client as ds_client
+    from app.services.deepseek.format import sanitize_for_telegram
+
+    messages = [
+        {"role": "system", "content": FOOD_PHOTO_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{image_mime};base64,{image_base64}",
+                    },
+                },
+            ],
+        },
+    ]
+
+    try:
+        result = await ds_client.chat_raw(messages)
+        reply = sanitize_for_telegram(result.content)
+    except Exception as exc:
+        logger.exception("Food photo analysis failed")
+        reply = (
+            "📸 No he podido analizar la foto en este momento. "
+            "Puedes describirme la comida y te ayudo igualmente."
+        )
+        result = None
+
+    db.add(
+        Message(
+            conversation_id=conversation.id,
+            role=MessageRole.ASSISTANT,
+            content=reply,
+            tokens_prompt=result.tokens_prompt if result else 0,
+            tokens_completion=result.tokens_completion if result else 0,
+        )
+    )
+    await db.commit()
+
+    return conversation.id, reply

@@ -1,5 +1,7 @@
 """HTTP client for talking to the NutriBot backend."""
 
+import base64
+
 import httpx
 
 from config import get_settings
@@ -36,6 +38,35 @@ async def send_interaction(
                 "full_name": full_name,
                 "text": text,
                 "action": action,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def send_photo_interaction(
+    telegram_id: int,
+    full_name: str | None,
+    image_bytes: bytes,
+    mime_type: str = "image/jpeg",
+    caption: str | None = None,
+) -> dict:
+    """POST a food photo to the backend for AI analysis.
+
+    Returns the raw BotReply dict: {text, buttons, allow_free_text}.
+    """
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+    async with httpx.AsyncClient(
+        timeout=max(settings.request_timeout, 120.0)  # vision calls may take longer
+    ) as client:
+        response = await client.post(
+            f"{settings.backend_url}/api/v1/bot/message",
+            json={
+                "telegram_id": telegram_id,
+                "full_name": full_name,
+                "text": caption,
+                "image_base64": image_b64,
+                "image_mime": mime_type,
             },
         )
         response.raise_for_status()

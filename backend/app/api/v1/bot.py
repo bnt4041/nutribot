@@ -22,6 +22,8 @@ async def bot_message(
             full_name=payload.full_name,
             text=payload.text,
             action=payload.action,
+            image_base64=payload.image_base64,
+            image_mime=payload.image_mime,
         )
     except Exception as exc:  # noqa: BLE001 - surface upstream failures as 502
         raise HTTPException(

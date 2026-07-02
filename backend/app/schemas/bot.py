@@ -12,12 +12,18 @@ class BotButton(BaseModel):
 
 
 class BotMessageRequest(BaseModel):
-    """Anything the user does in Telegram: a text message or a button tap."""
+    """Anything the user does in Telegram: a text message, a button tap, or a photo."""
 
     telegram_id: int
     full_name: str | None = None
-    text: str | None = Field(default=None, description="Free-text message")
+    text: str | None = Field(default=None, description="Free-text message or photo caption")
     action: str | None = Field(default=None, description="Button callback value")
+    image_base64: str | None = Field(
+        default=None,
+        description="Base64-encoded JPEG/PNG image when user sends a photo",
+    )
+    # MIME type of the image (e.g. image/jpeg). Helps the vision model.
+    image_mime: str | None = Field(default=None)
 
 
 class BotReply(BaseModel):

@@ -132,5 +132,24 @@ class DeepSeekClient:
         )
 
 
+    async def chat_raw(self, messages: list[dict]) -> ChatResult:
+        """Send arbitrary messages (including image content blocks) without tools.
+
+        The ``messages`` list may contain dicts with ``content`` as a list of
+        content blocks (text + image_url), as in the OpenAI vision API.
+        """
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            messages=messages,  # type: ignore[arg-type]
+        )
+        choice = response.choices[0]
+        usage = response.usage
+        return ChatResult(
+            content=choice.message.content or "",
+            tokens_prompt=usage.prompt_tokens if usage else None,
+            tokens_completion=usage.completion_tokens if usage else None,
+        )
+
+
 # Module-level singleton (the SDK client is safe to reuse).
 deepseek_client = DeepSeekClient()

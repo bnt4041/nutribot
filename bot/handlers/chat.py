@@ -6,12 +6,13 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
-from backend_client import send_interaction
+from backend_client import send_interaction, send_photo_interaction
 from render import send_reply
 
 logger = logging.getLogger(__name__)
 
 ERROR_TEXT = "Ups, ha ocurrido un error. Inténtalo de nuevo en un momento."
+PHOTO_ERROR_TEXT = "📸 No pude procesar la foto. ¿Puedes describirme la comida?"
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -29,6 +30,35 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(ERROR_TEXT)
         return
     await send_reply(update.effective_chat.id, context, reply)
+
+
+async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Download a food photo and send it to the backend for AI analysis."""
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+
+    # Let the user know we're working on it
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+    try:
+        # Get the largest photo (last in the array)
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        image_bytes = await file.download_as_bytearray()
+
+        caption = update.message.caption or None
+
+        reply = await send_photo_interaction(
+            telegram_id=user.id,
+            full_name=user.full_name,
+            image_bytes=bytes(image_bytes),
+            caption=caption,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("photo interaction failed")
+        await context.bot.send_message(chat_id=chat_id, text=PHOTO_ERROR_TEXT)
+        return
+    await send_reply(chat_id, context, reply)
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 from config import get_settings
-from handlers.chat import on_callback, on_message
+from handlers.chat import on_callback, on_message, on_photo
 from handlers.commands import help_command, login, nueva, start
 
 logging.basicConfig(
@@ -33,6 +33,7 @@ def main() -> None:
     app.add_handler(CommandHandler("nueva", nueva))
     app.add_handler(CommandHandler("login", login))
     app.add_handler(CallbackQueryHandler(on_callback))
+    app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
     logger.info("NutriBot starting (polling)...")

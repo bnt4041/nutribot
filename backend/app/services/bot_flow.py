@@ -3,6 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.models.user import User
 from app.schemas.bot import BotButton, BotReply
 from app.services import onboarding
 from app.services.chat import get_or_create_user, handle_message
@@ -49,6 +50,8 @@ async def handle_update(
     full_name: str | None,
     text: str | None,
     action: str | None,
+    image_base64: str | None = None,
+    image_mime: str | None = None,
 ) -> BotReply:
     """Single entry point for every Telegram interaction."""
     user = await get_or_create_user(db, telegram_id, full_name)
@@ -70,7 +73,7 @@ async def handle_update(
         await db.commit()  # persist user creation
         return _consent_reply(terms.content, prefix)
 
-    # 2) Onboarding gate.
+    # 2) Onboarding gate — photo not supported during onboarding.
     if user.onboarding_completed_at is None:
         if action == "start":
             reply = (
@@ -80,6 +83,12 @@ async def handle_update(
             )
             await db.commit()
             return _with_profile_button(reply)
+
+        if image_base64:
+            return BotReply(
+                text="📸 Primero termina tu perfil y luego podré analizar tus fotos de comida. "
+                "Responde a la pregunta actual para continuar."
+            )
 
         action_value: str | None = None
         if action and action.startswith("ob:"):
@@ -102,6 +111,10 @@ async def handle_update(
     if action == "start":
         return _with_profile_button(BotReply(text=WELCOME_BACK))
 
+    # ── Photo analysis ─────────────────────────────────────────────────
+    if image_base64:
+        return await _handle_photo(db, user, image_base64, image_mime, text)
+
     start_new = action == "nueva"
     user_text = text or "Hola"
     _, answer = await handle_message(
@@ -113,3 +126,23 @@ async def handle_update(
     )
     prefix = "🆕 Nueva conversación iniciada.\n\n" if start_new else ""
     return _with_profile_button(BotReply(text=prefix + answer))
+
+
+async def _handle_photo(
+    db: AsyncSession,
+    user: User,
+    image_base64: str,
+    image_mime: str | None,
+    caption: str | None,
+) -> BotReply:
+    """Analyze a food photo with the AI vision model and optionally log it."""
+    from app.services.chat import handle_food_photo
+
+    _, answer = await handle_food_photo(
+        db,
+        user=user,
+        image_base64=image_base64,
+        image_mime=image_mime or "image/jpeg",
+        caption=caption,
+    )
+    return _with_profile_button(BotReply(text=answer))
