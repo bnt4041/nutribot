@@ -12,7 +12,7 @@ from telegram.ext import (
 
 from config import get_settings
 from handlers.chat import on_callback, on_message, on_photo
-from handlers.commands import help_command, login, nueva, start
+from handlers.commands import help_command, informe, login, nueva, start
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -31,6 +31,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("nueva", nueva))
+    app.add_handler(CommandHandler("informe", informe))
     app.add_handler(CommandHandler("login", login))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))

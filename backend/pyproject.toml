@@ -15,6 +15,7 @@ dependencies = [
     "openai>=1.54",
     "pyjwt>=2.9",
     "bcrypt>=4.2",
+    "fpdf2>=2.8",
 ]
 
 [dependency-groups]

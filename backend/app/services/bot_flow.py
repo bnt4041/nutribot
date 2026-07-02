@@ -22,14 +22,20 @@ PROFILE_BUTTON = BotButton(
     label="📊 Ver mi perfil",
     url=f"{settings.dashboard_client_url}/login",
 )
+REPORT_BUTTON = BotButton(
+    label="📥 Mi informe",
+    value="informe",
+)
 
 
 def _with_profile_button(reply: BotReply) -> BotReply:
-    """Append the profile dashboard button to any reply (except consent)."""
+    """Append the profile dashboard button and report button to any reply."""
     buttons = list(reply.buttons)
     # Don't duplicate if already present.
     if not any(b.url == PROFILE_BUTTON.url for b in buttons if b.url):
         buttons.append(PROFILE_BUTTON)
+    if not any(b.value == "informe" for b in buttons if b.value):
+        buttons.append(REPORT_BUTTON)
     return BotReply(text=reply.text, buttons=buttons, allow_free_text=reply.allow_free_text)
 
 

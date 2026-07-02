@@ -71,3 +71,18 @@ async def send_photo_interaction(
         )
         response.raise_for_status()
         return response.json()
+
+
+async def download_report(telegram_id: int) -> bytes:
+    """Download the PDF nutrition report for a Telegram user.
+
+    Returns the raw PDF bytes.
+    """
+    async with httpx.AsyncClient(
+        timeout=max(settings.request_timeout, 30.0)
+    ) as client:
+        response = await client.get(
+            f"{settings.backend_url}/api/v1/bot/report/{telegram_id}",
+        )
+        response.raise_for_status()
+        return response.content

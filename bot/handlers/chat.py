@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
-from backend_client import send_interaction, send_photo_interaction
+from backend_client import download_report, send_interaction, send_photo_interaction
 from render import send_reply
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,32 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle inline-button taps (consent / onboarding choices)."""
+    """Handle inline-button taps (consent / onboarding choices / informe)."""
     query = update.callback_query
     await query.answer()
     user = update.effective_user
+    chat_id = update.effective_chat.id
+
+    # ── "informe" action: download and send PDF directly ────────────────
+    if query.data == "informe":
+        await query.edit_message_text("📄 Generando tu informe nutricional...")
+        try:
+            pdf_bytes = await download_report(user.id)
+        except Exception:
+            logger.exception("report download failed")
+            await query.edit_message_text(
+                "❌ No pude generar el informe ahora. Usa /informe para reintentar."
+            )
+            return
+        from datetime import date
+        filename = f"NutriBot-informe-{date.today().isoformat()}.pdf"
+        await context.bot.send_document(
+            chat_id=chat_id,
+            document=pdf_bytes,
+            filename=filename,
+            caption="🥗 ¡Aquí tienes tu informe nutricional!",
+        )
+        return
 
     # Remove the keyboard from the tapped message to avoid stale re-taps.
     try:
