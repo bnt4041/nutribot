@@ -140,22 +140,6 @@ async def handle_message(
     return conversation.id, reply
 
 
-FOOD_PHOTO_PROMPT = """Eres NutriBot, un asistente nutricional. Analiza esta foto de comida o bebida.
-
-Responde en español, en este formato exacto (sin Markdown, como texto de chat):
-
-📸 He visto:
-- [Nombre del plato/alimento principal]
-- Ingredientes que distingas: [lista breve]
-- Cantidad estimada: [aprox en gramos o unidades]
-- Calorías estimadas totales: [X] kcal
-- Proteína: [X]g · Carbs: [X]g · Grasa: [X]g
-
-Después, en un párrafo aparte, di si quieres que lo registre en tu diario. Si el usuario añadió un comentario con la foto (caption), tenlo en cuenta.
-
-Sé honesto si no puedes identificar bien algo — di "No estoy seguro" en ese caso. No inventes cifras demasiado precisas, usa rangos o aproximaciones."""
-
-
 async def handle_food_photo(
     db: AsyncSession,
     user: User,
@@ -183,44 +167,29 @@ async def handle_food_photo(
     )
     await db.flush()
 
-    # Call vision model
-    from app.services.deepseek.client import deepseek_client as ds_client
+    # Call Gemini Vision (free tier) for food photo analysis
     from app.services.deepseek.format import sanitize_for_telegram
+    from app.services.deepseek.vision import analyze_food_image
 
-    messages = [
-        {"role": "system", "content": FOOD_PHOTO_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_text},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{image_mime};base64,{image_base64}",
-                    },
-                },
-            ],
-        },
-    ]
-
+    tokens_prompt = 0
+    tokens_completion = 0
     try:
-        result = await ds_client.chat_raw(messages)
-        reply = sanitize_for_telegram(result.content)
-    except Exception as exc:
+        reply = await analyze_food_image(image_base64, image_mime)
+        reply = sanitize_for_telegram(reply)
+    except Exception:
         logger.exception("Food photo analysis failed")
         reply = (
             "📸 No he podido analizar la foto en este momento. "
             "Puedes describirme la comida y te ayudo igualmente."
         )
-        result = None
 
     db.add(
         Message(
             conversation_id=conversation.id,
             role=MessageRole.ASSISTANT,
             content=reply,
-            tokens_prompt=result.tokens_prompt if result else 0,
-            tokens_completion=result.tokens_completion if result else 0,
+            tokens_prompt=tokens_prompt,
+            tokens_completion=tokens_completion,
         )
     )
     await db.commit()

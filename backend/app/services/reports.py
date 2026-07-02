@@ -1,7 +1,7 @@
 """PDF report generation: nutrition summary, diet plan, and weight history."""
 
-import io
-from datetime import date, datetime
+import os
+from datetime import date
 
 from fpdf import FPDF
 
@@ -17,17 +17,22 @@ MEAL_ES = {
     MealType.DINNER: "Cena",
     MealType.SNACK: "Snack",
 }
-DAYS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DAYS_ES = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes", "Sabado", "Domingo"]
 GOAL_ES = {
     Goal.LOSE: "Perder grasa",
     Goal.MAINTAIN: "Mantener peso",
-    Goal.GAIN: "Ganar músculo",
+    Goal.GAIN: "Ganar musculo",
 }
 
-BRAND = (22, 163, 74)  # green-600
+BRAND = (22, 163, 74)
 DARK = (50, 50, 50)
 GRAY = (120, 120, 120)
 LIGHT_GRAY = (230, 230, 230)
+
+_DEJAVU = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_DEJAVU_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+_USE_UNICODE = os.path.isfile(_DEJAVU) and os.path.isfile(_DEJAVU_BOLD)
+FONT = "DejaVu" if _USE_UNICODE else "Helvetica"
 
 
 class NutriReport(FPDF):
@@ -38,74 +43,70 @@ class NutriReport(FPDF):
         self.user = user
         self.profile = profile
         self.set_auto_page_break(auto=True, margin=20)
+        if _USE_UNICODE:
+            self.add_font(FONT, "", _DEJAVU, uni=True)
+            self.add_font(FONT, "B", _DEJAVU_BOLD, uni=True)
 
-    def header(self):
-        if self.page_no() == 1:
-            # Title page header
-            self.set_fill_color(*BRAND)
-            self.rect(0, 0, 210, 55, "F")
-            self.set_y(18)
-            self.set_font("Helvetica", "B", 28)
-            self.set_text_color(255, 255, 255)
-            self.cell(0, 12, "🥗  NutriBot", align="C", new_x="LMARGIN", new_y="NEXT")
-            self.set_font("Helvetica", "", 13)
-            self.cell(0, 8, "Informe nutricional", align="C", new_x="LMARGIN", new_y="NEXT")
-            self.set_y(60)
-        else:
-            self.set_font("Helvetica", "I", 9)
-            self.set_text_color(*GRAY)
-            self.cell(0, 6, f"NutriBot — {self.user.full_name or 'Usuario'}", align="R")
-            self.line(10, self.get_y() + 2, 200, self.get_y() + 2)
-            self.ln(8)
+    def _txt(self, style: str, size: int, color: tuple = DARK):
+        self.set_font(FONT, style, size)
+        self.set_text_color(*color)
 
-    def footer(self):
-        self.set_y(-18)
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(*GRAY)
-        self.cell(0, 10, f"Generado el {date.today().strftime('%d/%m/%Y')}  |  Página {self.page_no()}/{{nb}}", align="C")
-
-    def section_title(self, title: str):
-        self.set_font("Helvetica", "B", 14)
-        self.set_text_color(*DARK)
+    def _section(self, title: str):
+        self._txt("B", 14)
         self.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
-        # Green underline
         self.set_draw_color(*BRAND)
         self.set_line_width(0.6)
         self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
         self.ln(4)
 
-    def key_value(self, key: str, value: str, w_key: float = 55):
-        self.set_font("Helvetica", "", 10)
-        self.set_text_color(*GRAY)
-        self.cell(w_key, 7, key)
-        self.set_text_color(*DARK)
-        self.set_font("Helvetica", "B", 10)
+    def _kv(self, key: str, value: str, w: float = 55):
+        self._txt("", 10, GRAY)
+        self.cell(w, 7, key)
+        self._txt("B", 10)
         self.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
 
-    def macro_row(self, label: str, current: float, target: float | None, unit: str):
-        self.set_font("Helvetica", "", 10)
-        self.set_text_color(*GRAY)
+    def _macro_bar(self, label: str, cur: float, target: float | None, unit: str):
+        self._txt("", 10, GRAY)
         self.cell(45, 7, label)
-        self.set_text_color(*DARK)
-        self.set_font("Helvetica", "B", 11)
-        val = f"{current:.0f}"
+        self._txt("B", 11)
+        val = f"{cur:.0f}"
         if target:
             val += f" / {target:.0f}"
         self.cell(40, 7, f"{val} {unit}")
-        # Progress bar
         if target and target > 0:
-            pct = min(current / target, 1.0)
+            pct = min(cur / target, 1.0)
             bar_w = 80
             self.set_fill_color(*LIGHT_GRAY)
             self.rect(self.get_x(), self.get_y() + 1.5, bar_w, 4, "F")
             self.set_fill_color(*BRAND)
             self.rect(self.get_x(), self.get_y() + 1.5, bar_w * pct, 4, "F")
             self.set_x(self.get_x() + bar_w + 3)
-            self.set_font("Helvetica", "", 9)
-            self.set_text_color(*GRAY)
+            self._txt("", 9, GRAY)
             self.cell(0, 7, f"({pct:.0%})", new_x="LMARGIN", new_y="NEXT")
         else:
             self.ln(7)
+
+    def header(self):
+        if self.page_no() == 1:
+            self.set_fill_color(*BRAND)
+            self.rect(0, 0, 210, 55, "F")
+            self.set_y(18)
+            self._txt("B", 26, (255, 255, 255))
+            self.cell(0, 12, "NutriBot", align="C", new_x="LMARGIN", new_y="NEXT")
+            self._txt("", 13, (255, 255, 255))
+            self.cell(0, 8, "Informe nutricional", align="C", new_x="LMARGIN", new_y="NEXT")
+            self.set_y(60)
+        else:
+            self._txt("", 9, GRAY)
+            self.cell(0, 6, f"NutriBot - {self.user.full_name or 'Usuario'}", align="R")
+            self.line(10, self.get_y() + 2, 200, self.get_y() + 2)
+            self.ln(8)
+
+    def footer(self):
+        self.set_y(-18)
+        self._txt("", 8, GRAY)
+        today = date.today().strftime("%d/%m/%Y")
+        self.cell(0, 10, f"Generado el {today}  |  Pagina {self.page_no()}/{{nb}}", align="C")
 
 
 def generate_report_pdf(
@@ -115,106 +116,90 @@ def generate_report_pdf(
     diet_items: list[DietPlanItem],
     weight_history: list[WeightLog],
 ) -> bytes:
-    """Generate a full nutrition report PDF and return the bytes."""
     pdf = NutriReport(user, profile)
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    # ── 1. Profile ──────────────────────────────────────────────────────
-    pdf.section_title("👤  Datos del perfil")
-    pdf.key_value("Nombre", user.full_name or "—")
+    pdf._section("Datos del perfil")
+    pdf._kv("Nombre", user.full_name or "-")
     if profile:
-        pdf.key_value("Objetivo", GOAL_ES.get(profile.goal, "—") if profile.goal else "—")
-        pdf.key_value("Peso actual", f"{profile.current_weight_kg} kg" if profile.current_weight_kg else "—")
-        pdf.key_value("Peso objetivo", f"{profile.target_weight_kg} kg" if profile.target_weight_kg else "—")
-        pdf.key_value("Altura", f"{profile.height_cm} cm" if profile.height_cm else "—")
-        pdf.key_value("Actividad", profile.activity_level.value if profile.activity_level else "—")
+        pdf._kv("Objetivo", GOAL_ES.get(profile.goal, "-") if profile.goal else "-")
+        pdf._kv("Peso actual", f"{profile.current_weight_kg} kg" if profile.current_weight_kg else "-")
+        pdf._kv("Peso objetivo", f"{profile.target_weight_kg} kg" if profile.target_weight_kg else "-")
+        pdf._kv("Altura", f"{profile.height_cm} cm" if profile.height_cm else "-")
+        pdf._kv("Actividad", profile.activity_level.value if profile.activity_level else "-")
     pdf.ln(4)
 
-    # ── 2. Today's summary ──────────────────────────────────────────────
-    pdf.section_title("📊  Resumen de hoy")
+    pdf._section("Resumen de hoy")
     totals = daily_summary.get("totals", {})
     targets = daily_summary.get("targets") or {}
-    pdf.macro_row("Calorías", totals.get("calories", 0), targets.get("calories"), "kcal")
-    pdf.macro_row("Proteína", totals.get("protein_g", 0), targets.get("protein_g"), "g")
-    pdf.macro_row("Carbohidratos", totals.get("carbs_g", 0), targets.get("carbs_g"), "g")
-    pdf.macro_row("Grasas", totals.get("fat_g", 0), targets.get("fat_g"), "g")
+    pdf._macro_bar("Calorias", totals.get("calories", 0), targets.get("calories"), "kcal")
+    pdf._macro_bar("Proteina", totals.get("protein_g", 0), targets.get("protein_g"), "g")
+    pdf._macro_bar("Carbohidratos", totals.get("carbs_g", 0), targets.get("carbs_g"), "g")
+    pdf._macro_bar("Grasas", totals.get("fat_g", 0), targets.get("fat_g"), "g")
     pdf.ln(4)
 
-    # ── 3. Diet plan ────────────────────────────────────────────────────
-    pdf.section_title("🥗  Plan de dieta")
+    pdf._section("Plan de dieta")
     if diet_items:
-        current_date = None
+        cur_date = None
         for item in diet_items:
-            if item.scheduled_date != current_date:
-                current_date = item.scheduled_date
-                if current_date:
-                    ds = current_date.strftime("%d/%m/%Y")
-                    dw = DAYS_ES[current_date.weekday()]
-                    pdf.set_font("Helvetica", "B", 11)
-                    pdf.set_text_color(*BRAND)
+            if item.scheduled_date != cur_date:
+                cur_date = item.scheduled_date
+                if cur_date:
+                    ds = cur_date.strftime("%d/%m/%Y")
+                    dw = DAYS_ES[cur_date.weekday()]
+                    pdf._txt("B", 11, BRAND)
                     pdf.cell(0, 8, f"{dw} {ds}", new_x="LMARGIN", new_y="NEXT")
 
             meal_label = MEAL_ES.get(item.meal_type, "") if item.meal_type else ""
             time_str = f" ({item.scheduled_time.strftime('%H:%M')})" if item.scheduled_time else ""
-            status_str = "✓" if item.status == DietItemStatus.CONFIRMED else "○"
+            status_str = "V" if item.status == DietItemStatus.CONFIRMED else "O"
 
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(*DARK)
+            pdf._txt("", 10)
             prefix = f"  {status_str} {meal_label}{time_str}: " if meal_label else f"  {status_str} "
             pdf.cell(0, 7, f"{prefix}{item.title}", new_x="LMARGIN", new_y="NEXT")
 
-            # Macros line
-            macros_parts = []
+            macros = []
             if item.calories:
-                macros_parts.append(f"{float(item.calories):.0f} kcal")
+                macros.append(f"{float(item.calories):.0f} kcal")
             if item.protein_g:
-                macros_parts.append(f"P {float(item.protein_g):.0f}g")
+                macros.append(f"P {float(item.protein_g):.0f}g")
             if item.carbs_g:
-                macros_parts.append(f"C {float(item.carbs_g):.0f}g")
+                macros.append(f"C {float(item.carbs_g):.0f}g")
             if item.fat_g:
-                macros_parts.append(f"G {float(item.fat_g):.0f}g")
-            if macros_parts:
+                macros.append(f"G {float(item.fat_g):.0f}g")
+            if macros:
                 pdf.set_x(pdf.l_margin + 10)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.set_text_color(*GRAY)
-                pdf.cell(0, 6, " · ".join(macros_parts), new_x="LMARGIN", new_y="NEXT")
+                pdf._txt("", 8, GRAY)
+                pdf.cell(0, 6, " | ".join(macros), new_x="LMARGIN", new_y="NEXT")
     else:
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(*GRAY)
-        pdf.cell(0, 7, "No hay comidas planificadas aún.", new_x="LMARGIN", new_y="NEXT")
+        pdf._txt("", 10, GRAY)
+        pdf.cell(0, 7, "No hay comidas planificadas aun.", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
-    # ── 4. Weight history ───────────────────────────────────────────────
     if weight_history:
-        pdf.section_title("⚖️  Historial de peso")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(*GRAY)
+        pdf._section("Historial de peso")
+        pdf._txt("", 10, GRAY)
         pdf.cell(60, 7, "Fecha")
         pdf.cell(40, 7, "Peso (kg)", new_x="LMARGIN", new_y="NEXT")
         pdf.set_draw_color(*LIGHT_GRAY)
         pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
         pdf.ln(2)
-
-        for w in weight_history[-14:]:  # last 14 entries
-            pdf.set_font("Helvetica", "", 10)
-            pdf.set_text_color(*DARK)
+        for w in weight_history[-14:]:
+            pdf._txt("", 10)
             date_str = w.logged_at.strftime("%d/%m/%Y")
             pdf.cell(60, 7, date_str)
-            pdf.set_font("Helvetica", "B", 10)
+            pdf._txt("B", 10)
             pdf.cell(40, 7, f"{float(w.weight_kg):.1f}", new_x="LMARGIN", new_y="NEXT")
 
-    # ── 5. Disclaimer ───────────────────────────────────────────────────
     pdf.ln(6)
     pdf.set_draw_color(*LIGHT_GRAY)
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
     pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.set_text_color(*GRAY)
+    pdf._txt("", 8, GRAY)
     pdf.multi_cell(0, 5,
         "Este informe es orientativo y no sustituye el consejo de un profesional "
-        "sanitario. NutriBot es un asistente nutricional, no un médico ni dietista "
-        "colegiado."
+        "sanitario. NutriBot es un asistente nutricional, no un medico ni dietista colegiado."
     )
 
-    return pdf.output()
+    return bytes(pdf.output())

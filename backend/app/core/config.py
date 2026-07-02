@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     deepseek_base_url: str = Field(default="https://api.deepseek.com")
     deepseek_model: str = Field(default="deepseek-chat")
 
+    # Gemini Vision (food photo analysis — free tier: 1500 img/day)
+    gemini_api_key: str = Field(default="")
+    gemini_vision_model: str = Field(default="gemini-2.0-flash")
+
     # How many past messages to include as context per DeepSeek call.
     chat_history_limit: int = Field(default=20)
 

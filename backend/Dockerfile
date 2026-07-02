@@ -1,6 +1,11 @@
 # Backend image: Python 3.12 + uv for dependency management
 FROM python:3.12-slim
 
+# Install system deps (DejaVu fonts for PDF reports with Unicode/emoji support)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv (fast Python package manager)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
