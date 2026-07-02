@@ -1,22 +1,30 @@
 """Authenticated client dashboard endpoints (self-service, JWT-protected)."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.conversation import Conversation, Message
+from app.models.enums import DietItemStatus
 from app.models.nutrition_profile import NutritionProfile
 from app.models.user import User
 from app.models.weight_log import WeightLog
 from app.schemas.me import (
     ConversationOut,
+    DietPlanItemCreate,
+    DietPlanItemOut,
+    DietPlanItemUpdate,
     MessageOut,
+    NoteCreate,
+    NoteOut,
     ProfileOut,
+    ProfileUpdateIn,
     WeightPointOut,
 )
-from app.services.nutrition import tracking
+from app.services import preferences, profile as profile_service
+from app.services.nutrition import diet_plan, tracking
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -25,15 +33,7 @@ def _num(value):
     return float(value) if value is not None else None
 
 
-@router.get("", response_model=ProfileOut)
-async def get_me(
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
-) -> ProfileOut:
-    """Return the current user's account and nutrition profile."""
-    result = await db.execute(
-        select(NutritionProfile).where(NutritionProfile.user_id == user.id)
-    )
-    p = result.scalar_one_or_none()
+def _profile_out(user: User, p: NutritionProfile | None) -> ProfileOut:
     return ProfileOut(
         full_name=user.full_name,
         email=user.email,
@@ -55,6 +55,44 @@ async def get_me(
         target_carbs_g=_num(p.target_carbs_g) if p else None,
         target_fat_g=_num(p.target_fat_g) if p else None,
     )
+
+
+@router.get("", response_model=ProfileOut)
+async def get_me(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> ProfileOut:
+    """Return the current user's account and nutrition profile."""
+    p = await profile_service.get_profile(db, user)
+    return _profile_out(user, p)
+
+
+@router.patch("", response_model=ProfileOut)
+async def update_me(
+    payload: ProfileUpdateIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileOut:
+    """Update the current user's data and objectives (partial)."""
+    try:
+        p = await profile_service.update_profile(
+            db, user, **payload.model_dump(exclude_unset=True)
+        )
+    except profile_service.ProfileValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await db.commit()
+    return _profile_out(user, p)
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_me(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> Response:
+    """Permanently delete the current user's account and all their data."""
+    await profile_service.delete_account(db, user)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/nutrition/summary")
@@ -136,3 +174,104 @@ async def my_conversation_messages(
         .order_by(Message.id)
     )
     return list(result.scalars().all())
+
+
+# --- Recommended diet plan -------------------------------------------------
+
+
+@router.get("/diet-plan", response_model=list[DietPlanItemOut])
+async def my_diet_plan(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[DietPlanItemOut]:
+    """The current user's recommended meals/agenda (proposed and confirmed)."""
+    items = await diet_plan.list_items(db, user)
+    return [DietPlanItemOut(**diet_plan.item_to_dict(i)) for i in items]
+
+
+@router.post("/diet-plan", response_model=DietPlanItemOut, status_code=status.HTTP_201_CREATED)
+async def create_diet_plan_item(
+    payload: DietPlanItemCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DietPlanItemOut:
+    """Add a meal to the plan. User-created items are confirmed by default."""
+    data = payload.model_dump(exclude_unset=True)
+    raw_status = data.pop("status", None)
+    item = await diet_plan.add_item(
+        db,
+        user,
+        source="user",
+        status=DietItemStatus(raw_status) if raw_status else DietItemStatus.CONFIRMED,
+        **data,
+    )
+    await db.commit()
+    return DietPlanItemOut(**diet_plan.item_to_dict(item))
+
+
+@router.patch("/diet-plan/{item_id}", response_model=DietPlanItemOut)
+async def update_diet_plan_item(
+    item_id: int,
+    payload: DietPlanItemUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DietPlanItemOut:
+    """Edit a plan item or confirm a proposal (status='confirmed')."""
+    item = await diet_plan.get_item(db, user, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    item = await diet_plan.update_item(db, item, **payload.model_dump(exclude_unset=True))
+    await db.commit()
+    return DietPlanItemOut(**diet_plan.item_to_dict(item))
+
+
+@router.delete("/diet-plan/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_diet_plan_item(
+    item_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    item = await diet_plan.get_item(db, user, item_id)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    await diet_plan.delete_item(db, item)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- "A tener en cuenta" notes ---------------------------------------------
+
+
+@router.get("/notes", response_model=list[NoteOut])
+async def my_notes(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[NoteOut]:
+    """Things the assistant should keep in mind about the current user."""
+    notes = await preferences.list_notes(db, user)
+    return [NoteOut(**preferences.note_to_dict(n)) for n in notes]
+
+
+@router.post("/notes", response_model=NoteOut, status_code=status.HTTP_201_CREATED)
+async def create_note(
+    payload: NoteCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NoteOut:
+    note = await preferences.add_note(
+        db, user, content=payload.content, category=payload.category, source="user"
+    )
+    await db.commit()
+    return NoteOut(**preferences.note_to_dict(note))
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_note(
+    note_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    note = await preferences.get_note(db, user, note_id)
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    await preferences.delete_note(db, note)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

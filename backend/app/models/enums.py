@@ -41,6 +41,23 @@ class MealType(str, enum.Enum):
     SNACK = "snack"
 
 
+class DietItemStatus(str, enum.Enum):
+    """Lifecycle of a recommended diet-plan item."""
+
+    PROPOSED = "proposed"  # suggested by the AI, awaiting the user's confirmation
+    CONFIRMED = "confirmed"  # accepted by the user (via chat or dashboard)
+
+
+class NoteCategory(str, enum.Enum):
+    """Kind of "a tener en cuenta" note the AI keeps about a user."""
+
+    DISLIKE = "dislike"  # foods/things the user dislikes or avoids
+    LIKE = "like"  # foods/things the user enjoys
+    MEDICAL = "medical"  # medical/health considerations worth remembering
+    HABIT = "habit"  # routines, schedules, lifestyle habits
+    OTHER = "other"
+
+
 class DocumentStatus(str, enum.Enum):
     PENDING = "pending"
     INDEXED = "indexed"

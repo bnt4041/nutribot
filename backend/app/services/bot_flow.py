@@ -2,6 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.schemas.bot import BotButton, BotReply
 from app.services import onboarding
 from app.services.chat import get_or_create_user, handle_message
@@ -14,6 +15,21 @@ WELCOME_BACK = (
     "¡Hola de nuevo! 🥗 ¿En qué te ayudo hoy? Puedes preguntarme sobre nutrición "
     "o contarme qué has comido."
 )
+
+settings = get_settings()
+PROFILE_BUTTON = BotButton(
+    label="📊 Ver mi perfil",
+    url=f"{settings.dashboard_client_url}/login",
+)
+
+
+def _with_profile_button(reply: BotReply) -> BotReply:
+    """Append the profile dashboard button to any reply (except consent)."""
+    buttons = list(reply.buttons)
+    # Don't duplicate if already present.
+    if not any(b.url == PROFILE_BUTTON.url for b in buttons if b.url):
+        buttons.append(PROFILE_BUTTON)
+    return BotReply(text=reply.text, buttons=buttons, allow_free_text=reply.allow_free_text)
 
 
 def _consent_reply(content: str, prefix: str = "") -> BotReply:
@@ -44,7 +60,7 @@ async def handle_update(
             await record_consent(db, user, terms)
             reply = await onboarding.start(db, user)
             await db.commit()
-            return reply
+            return _with_profile_button(reply)
         prefix = ""
         if action == CONSENT_DECLINE:
             prefix = (
@@ -63,7 +79,7 @@ async def handle_update(
                 else await onboarding.start(db, user)
             )
             await db.commit()
-            return reply
+            return _with_profile_button(reply)
 
         action_value: str | None = None
         if action and action.startswith("ob:"):
@@ -72,7 +88,7 @@ async def handle_update(
                 # Stale button from an earlier step: just re-show the current one.
                 reply = onboarding.current_view(user) or await onboarding.start(db, user)
                 await db.commit()
-                return reply
+                return _with_profile_button(reply)
             action_value = value
 
         if user.onboarding_step is None:
@@ -80,11 +96,11 @@ async def handle_update(
         else:
             reply = await onboarding.process(db, user, text=text, action_value=action_value)
         await db.commit()
-        return reply
+        return _with_profile_button(reply)
 
     # 3) Normal chat (onboarding done).
     if action == "start":
-        return BotReply(text=WELCOME_BACK)
+        return _with_profile_button(BotReply(text=WELCOME_BACK))
 
     start_new = action == "nueva"
     user_text = text or "Hola"
@@ -96,4 +112,4 @@ async def handle_update(
         start_new=start_new,
     )
     prefix = "🆕 Nueva conversación iniciada.\n\n" if start_new else ""
-    return BotReply(text=prefix + answer)
+    return _with_profile_button(BotReply(text=prefix + answer))

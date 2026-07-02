@@ -13,9 +13,11 @@ from app.models.mixins import TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.conversation import Conversation
+    from app.models.diet_plan import DietPlanItem
     from app.models.legal import UserConsent
     from app.models.meal_log import MealLog
     from app.models.nutrition_profile import NutritionProfile
+    from app.models.user_note import UserNote
     from app.models.weight_log import WeightLog
 
 
@@ -55,6 +57,12 @@ class User(Base, TimestampMixin):
         back_populates="user", cascade="all, delete-orphan"
     )
     weight_logs: Mapped[list["WeightLog"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    diet_plan_items: Mapped[list["DietPlanItem"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    notes: Mapped[list["UserNote"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     consents: Mapped[list["UserConsent"]] = relationship(

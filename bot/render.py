@@ -8,9 +8,12 @@ def build_markup(buttons: list[dict] | None) -> InlineKeyboardMarkup | None:
     """Build an inline keyboard (one button per row) from BotReply buttons."""
     if not buttons:
         return None
-    keyboard = [
-        [InlineKeyboardButton(b["label"], callback_data=b["value"])] for b in buttons
-    ]
+    keyboard = []
+    for b in buttons:
+        if b.get("url"):
+            keyboard.append([InlineKeyboardButton(b["label"], url=b["url"])])
+        else:
+            keyboard.append([InlineKeyboardButton(b["label"], callback_data=b.get("value", ""))])
     return InlineKeyboardMarkup(keyboard)
 
 

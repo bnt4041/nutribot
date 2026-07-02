@@ -2,8 +2,22 @@
 
 from datetime import date
 
+from app.models.diet_plan import DietPlanItem
 from app.models.enums import ActivityLevel, Goal, Sex
 from app.models.nutrition_profile import NutritionProfile
+from app.models.user_note import UserNote
+from app.services.nutrition.diet_plan import plan_summary_lines
+from app.services.preferences import notes_summary_lines
+
+DAYS_ES_FULL = [
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+]
 
 # User-facing persona speaks Spanish (per project conventions).
 NUTRITION_SYSTEM_PROMPT = """Eres NutriBot, un asistente de nutrición conversacional \
@@ -26,6 +40,19 @@ la ficha y la foto del producto.
 - Usa los datos de la ficha del usuario que se indican más abajo. NO vuelvas a \
 preguntar información que ya tienes (objetivo, peso, altura, restricciones, alergias); \
 úsala directamente. Solo pregunta si falta un dato que necesites de verdad.
+- Presta atención a lo que el usuario cuenta: si detectas una preferencia o dato \
+relevante (algo que no le gusta o evita, algo que le encanta, una consideración de \
+salud o un hábito), guárdalo con la herramienta remember_preference para tenerlo en \
+cuenta siempre. Respeta esas notas y su ficha al dar consejos o proponer comidas.
+- Si el usuario quiere cambiar sus datos u objetivos (peso, meta, actividad, dieta, \
+alergias…), usa update_profile; se recalculan sus objetivos diarios solos.
+- Puedes proponerle una dieta recomendada en fechas concretas: usa add_diet_plan_item \
+para sugerir comidas (quedan como propuestas). Agenda cada comida en una fecha: si el \
+usuario menciona un día de la semana (ej. "el viernes"), usa weekday (0=Lunes … \
+6=Domingo) y se tomará el más cercano; si da una fecha, usa scheduled_date \
+(YYYY-MM-DD). Puedes planificar como máximo un mes vista. Cuando el usuario acepte una \
+comida, confírmala con update_diet_plan_item (status='confirmed'). Consulta \
+get_diet_plan antes para no duplicar.
 
 FORMATO (importante, el usuario lee en Telegram):
 - Escribe en texto plano y natural, como en un chat. Frases cortas.
@@ -55,8 +82,33 @@ def _age_from(birth: date) -> int:
     return today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
 
 
-def build_system_prompt(profile: NutritionProfile | None) -> str:
-    """Base persona plus a summary of the user's profile, when available."""
+def build_system_prompt(
+    profile: NutritionProfile | None,
+    notes: list[UserNote] | None = None,
+    diet_plan_items: list[DietPlanItem] | None = None,
+) -> str:
+    """Base persona plus the user's profile, notes and diet plan, when available."""
+    today = date.today()
+    prompt = _profile_prompt(profile)
+    prompt += (
+        f"\n\nFecha de hoy: {DAYS_ES_FULL[today.weekday()]} {today.isoformat()}. "
+        "Úsala para calcular fechas (p. ej. el día de la semana más cercano)."
+    )
+
+    if notes:
+        note_lines = notes_summary_lines(notes)
+        prompt += (
+            "\n\nA tener en cuenta (respétalo siempre al aconsejar o proponer):\n"
+            + "\n".join(note_lines)
+        )
+    if diet_plan_items:
+        plan_lines = plan_summary_lines(diet_plan_items)
+        prompt += "\n\nDieta recomendada actual del usuario:\n" + "\n".join(plan_lines)
+
+    return prompt
+
+
+def _profile_prompt(profile: NutritionProfile | None) -> str:
     if profile is None:
         return NUTRITION_SYSTEM_PROMPT
 

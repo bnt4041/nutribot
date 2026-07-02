@@ -3,10 +3,12 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    assetsInlineLimit: 0, // nunca convertir assets a base64 inline
+  },
   server: {
     host: "0.0.0.0",
     port: 5173,
-    // Polling makes file watching reliable inside Docker on Windows.
     watch: { usePolling: true },
   },
 });

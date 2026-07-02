@@ -25,32 +25,45 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-8 shadow">
-        <h1 className="mb-1 text-2xl font-bold">🛠️ NutriBot Admin</h1>
-        <p className="mb-6 text-sm text-gray-500">Accede con tu cuenta de administrador.</p>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-100 px-4">
+      <div className="w-full max-w-sm rounded-3xl bg-white/80 backdrop-blur-xl border border-white/50 p-8 shadow-2xl shadow-indigo-900/10">
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-xl shadow-indigo-500/30">
+            <span className="text-3xl">🛠️</span>
+          </div>
+          <h1 className="text-2xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            NutriBot Admin
+          </h1>
+          <p className="mt-2 text-sm text-gray-500">
+            Accede con tu cuenta de administrador
+          </p>
+        </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <input
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             type="email"
             placeholder="Email"
-            className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            className="input-field w-full"
           />
           <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
             placeholder="Contraseña"
-            className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+            className="input-field w-full"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <div className="rounded-xl border-2 border-red-200 bg-red-50 p-3 text-sm text-red-600 text-center">
+              ⚠️ {error}
+            </div>
+          )}
           <button
             type="submit"
             disabled={loading || !email || !password}
-            className="w-full rounded-lg bg-brand py-2 font-medium text-white transition hover:bg-brand-dark disabled:opacity-50"
+            className="btn-primary w-full py-3 text-base"
           >
-            {loading ? "Entrando…" : "Entrar"}
+            {loading ? "⏳ Entrando…" : "🔐 Entrar"}
           </button>
         </form>
       </div>

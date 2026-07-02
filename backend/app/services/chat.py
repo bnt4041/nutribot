@@ -14,6 +14,8 @@ from app.services.deepseek.client import ChatResult, deepseek_client
 from app.services.deepseek.format import sanitize_for_telegram
 from app.services.deepseek.prompts import build_system_prompt
 from app.services.deepseek.tools import FOOD_TOOLS, make_food_tool_executor
+from app.services.nutrition import diet_plan
+from app.services import preferences
 from app.services.rag.retrieval import build_context_block, retrieve
 
 logger = logging.getLogger(__name__)
@@ -99,9 +101,11 @@ async def handle_message(
         select(NutritionProfile).where(NutritionProfile.user_id == user.id)
     )
     profile = profile_result.scalar_one_or_none()
+    notes = await preferences.list_notes(db, user)
+    diet_items = await diet_plan.list_items(db, user)
 
     # RAG: retrieve relevant knowledge for this message and inject it as context.
-    system_prompt = build_system_prompt(profile)
+    system_prompt = build_system_prompt(profile, notes, diet_items)
     try:
         chunks = await retrieve(db, text)
         context_block = build_context_block(chunks)

@@ -48,55 +48,72 @@ export default function Legal() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Términos legales</h1>
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+          Términos legales
+        </h1>
+        <p className="mt-1 text-sm text-gray-500">Gestiona los términos que los usuarios deben aceptar</p>
+      </div>
 
-      <section className="rounded-xl bg-white p-5 shadow">
-        <h2 className="mb-3 font-semibold">Editar y publicar nueva versión</h2>
-        <form onSubmit={publish} className="space-y-3">
+      {/* Editor */}
+      <section className="card">
+        <div className="card-header">
+          <span className="text-lg">✍️</span>
+          <h2 className="font-bold text-gray-800">Editar y publicar nueva versión</h2>
+        </div>
+        <form onSubmit={publish} className="space-y-4">
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            rows={12}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            rows={14}
+            className="input-field w-full font-mono text-sm"
+            placeholder="Escribe aquí los términos legales…"
           />
           <button
             type="submit"
             disabled={busy || !content.trim()}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+            className="btn-primary inline-flex items-center gap-2"
           >
-            {busy ? "Publicando…" : "Publicar nueva versión"}
+            {busy ? "⏳ Publicando…" : "📋 Publicar nueva versión"}
           </button>
         </form>
       </section>
 
-      <section className="overflow-x-auto rounded-xl bg-white shadow">
-        <table className="min-w-full text-sm">
-          <thead className="border-b bg-gray-50 text-left text-gray-500">
+      {/* Version history */}
+      <div className="overflow-x-auto rounded-2xl border-2 border-gray-100 bg-white shadow-sm">
+        <table className="admin-table">
+          <thead>
             <tr>
-              <th className="px-4 py-3">Versión</th>
-              <th className="px-4 py-3">Tipo</th>
-              <th className="px-4 py-3">Activa</th>
-              <th className="px-4 py-3">Creada</th>
-              <th className="px-4 py-3">Acciones</th>
+              <th>Versión</th>
+              <th>Tipo</th>
+              <th>Activa</th>
+              <th>Creada</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {docs.map((d) => (
-              <tr key={d.id} className="border-b last:border-0">
-                <td className="px-4 py-3">v{d.version}</td>
-                <td className="px-4 py-3">{d.doc_type}</td>
-                <td className="px-4 py-3">{d.is_active ? "✅" : "—"}</td>
-                <td className="px-4 py-3 text-gray-500">
+              <tr key={d.id}>
+                <td className="font-semibold">v{d.version}</td>
+                <td>
+                  <span className="badge-gray">{d.doc_type}</span>
+                </td>
+                <td>
+                  {d.is_active ? (
+                    <span className="badge-green">✅ Activa</span>
+                  ) : (
+                    <span className="badge-gray">—</span>
+                  )}
+                </td>
+                <td className="text-gray-500 text-xs">
                   {new Date(d.created_at).toLocaleDateString()}
                 </td>
-                <td className="px-4 py-3">
+                <td>
                   {!d.is_active && (
-                    <button
-                      onClick={() => activate(d.id)}
-                      className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
-                    >
-                      Activar
+                    <button onClick={() => activate(d.id)} className="btn-ghost text-xs">
+                      🔓 Activar
                     </button>
                   )}
                 </td>
@@ -104,7 +121,7 @@ export default function Legal() {
             ))}
           </tbody>
         </table>
-      </section>
+      </div>
     </div>
   );
 }

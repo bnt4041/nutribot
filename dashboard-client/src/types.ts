@@ -59,6 +59,28 @@ export interface WeightPoint {
   weight_kg: number;
 }
 
+export interface DietPlanItem {
+  id: number;
+  scheduled_date: string | null;
+  meal_type: string | null;
+  scheduled_time: string | null;
+  title: string;
+  description: string | null;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  status: string;
+  source: string;
+}
+
+export interface Note {
+  id: number;
+  category: string;
+  content: string;
+  source: string;
+}
+
 export interface Conversation {
   id: number;
   title: string | null;

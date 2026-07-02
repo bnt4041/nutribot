@@ -23,63 +23,71 @@ export default function Users() {
   };
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Usuarios ({users.length})</h1>
-      <div className="overflow-x-auto rounded-xl bg-white shadow">
-        <table className="min-w-full text-sm">
-          <thead className="border-b bg-gray-50 text-left text-gray-500">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            Usuarios
+          </h1>
+          <p className="mt-0.5 text-sm text-gray-500">{users.length} registrados</p>
+        </div>
+        <button onClick={load} className="btn-secondary">🔄 Actualizar</button>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border-2 border-gray-100 bg-white shadow-sm">
+        <table className="admin-table">
+          <thead>
             <tr>
-              <th className="px-4 py-3">ID</th>
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Telegram / Email</th>
-              <th className="px-4 py-3">Rol</th>
-              <th className="px-4 py-3">Onboarding</th>
-              <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3">Acciones</th>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Telegram / Email</th>
+              <th>Rol</th>
+              <th>Onboarding</th>
+              <th>Estado</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {users.map((u) => (
-              <tr key={u.id} className="border-b last:border-0">
-                <td className="px-4 py-3">{u.id}</td>
-                <td className="px-4 py-3">{u.full_name || "—"}</td>
-                <td className="px-4 py-3 text-gray-500">
+              <tr key={u.id}>
+                <td className="font-mono text-xs text-gray-400">#{u.id}</td>
+                <td className="font-semibold">{u.full_name || "—"}</td>
+                <td className="text-gray-500 text-xs">
                   {u.email || u.telegram_id || "—"}
                 </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      u.role === "admin"
-                        ? "bg-indigo-100 text-indigo-700"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
-                  >
+                <td>
+                  <span className={u.role === "admin" ? "badge-indigo" : "badge-gray"}>
                     {u.role}
                   </span>
                 </td>
-                <td className="px-4 py-3">
-                  {u.onboarding_completed_at ? "✅" : "—"}
-                </td>
-                <td className="px-4 py-3">
-                  {u.is_active ? (
-                    <span className="text-green-600">activo</span>
+                <td>
+                  {u.onboarding_completed_at ? (
+                    <span className="badge-green">✅ Completado</span>
                   ) : (
-                    <span className="text-red-600">inactivo</span>
+                    <span className="badge-gray">—</span>
                   )}
                 </td>
-                <td className="px-4 py-3">
+                <td>
+                  {u.is_active ? (
+                    <span className="badge-green">🟢 Activo</span>
+                  ) : (
+                    <span className="badge-red">🔴 Inactivo</span>
+                  )}
+                </td>
+                <td>
                   <div className="flex gap-2">
                     <button
                       onClick={() => toggleActive(u)}
-                      className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                      className="btn-ghost text-xs"
                     >
-                      {u.is_active ? "Desactivar" : "Activar"}
+                      {u.is_active ? "⏸️ Desactivar" : "▶️ Activar"}
                     </button>
                     <button
                       onClick={() => toggleRole(u)}
-                      className="rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                      className="btn-ghost text-xs"
                     >
-                      {u.role === "admin" ? "Hacer cliente" : "Hacer admin"}
+                      {u.role === "admin" ? "👤 Hacer cliente" : "🛡️ Hacer admin"}
                     </button>
                   </div>
                 </td>

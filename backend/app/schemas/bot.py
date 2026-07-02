@@ -7,7 +7,8 @@ class BotButton(BaseModel):
     """A single inline-keyboard button."""
 
     label: str
-    value: str  # sent back as `action` when tapped
+    value: str | None = None  # sent back as `action` when tapped (callback_data)
+    url: str | None = None  # external URL button (ignores value when set)
 
 
 class BotMessageRequest(BaseModel):

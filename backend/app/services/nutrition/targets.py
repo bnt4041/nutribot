@@ -109,3 +109,16 @@ async def ensure_targets(db: AsyncSession, profile: NutritionProfile) -> Targets
     profile.target_fat_g = targets.fat_g
     await db.flush()
     return targets
+
+
+async def recompute_targets(db: AsyncSession, profile: NutritionProfile) -> Targets | None:
+    """Clear cached targets and recompute from the (updated) profile.
+
+    Use this after any change to the metrics that feed the calculation (weight,
+    height, age, activity, goal, weekly rate) so daily targets stay in sync.
+    """
+    profile.target_calories = None
+    profile.target_protein_g = None
+    profile.target_carbs_g = None
+    profile.target_fat_g = None
+    return await ensure_targets(db, profile)

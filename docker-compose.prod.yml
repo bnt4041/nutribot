@@ -1,25 +1,40 @@
-# Production stack for a VPS. TLS is handled by Caddy (automatic Let's Encrypt).
-# Requires a .env file (see .env.prod.example) and DNS records for the domains
-# pointing to the VPS. Bring up with:
-#   docker compose -f docker-compose.prod.yml up -d --build
+# NutriBot — Production stack integrado con Traefik existente (hrm-net)
+# Usa path-based routing en nutribot.alcurro.es:
+#   /       → dashboard-client (cliente)
+#   /admin  → dashboard-admin (administrador)
+#   /api    → backend FastAPI
+#
+# Despliegue:
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+#
+# NOTA: NO expone puertos 80/443 — Traefik existente ya los maneja.
+
 services:
-  db:
+  # ── BASE DE DATOS (pgvector) ────────────────────────────────────────────
+  # NOTA: el servicio se llama "nutribot-db" (no "db") para evitar conflicto
+  # con "db" de dolibarr y hrm-postgres en la misma red hrm-net.
+  nutribot-db:
     image: pgvector/pgvector:pg16
+    container_name: nutribot-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-nutribot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-nutribot}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - nutribot_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nutribot}"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - hrm-net
 
+  # ── EMBEDDINGS (BGE-M3 vía Text Embeddings Inference) ───────────────────
   embeddings:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    container_name: nutribot-embeddings
     command:
       - "--model-id"
       - "BAAI/bge-m3"
@@ -31,7 +46,7 @@ services:
       - "8"
       - "--auto-truncate"
     volumes:
-      - tei_data:/data
+      - nutribot_tei_data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s
@@ -39,72 +54,97 @@ services:
       retries: 30
       start_period: 300s
     restart: unless-stopped
+    networks:
+      - hrm-net
 
-  backend:
+  # ── BACKEND (FastAPI) ───────────────────────────────────────────────────
+  # NOTA: el servicio se llama "nutribot-api" (no "backend") para evitar
+  # conflicto con el servicio "backend" de Alcurro/HRM en la misma red hrm-net.
+  nutribot-api:
     build: ./backend
+    container_name: nutribot-backend
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://nutribot:${POSTGRES_PASSWORD}@db:5432/nutribot}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://nutribot:${POSTGRES_PASSWORD}@nutribot-db:5432/nutribot}
       EMBEDDINGS_URL: http://embeddings:80
-      CORS_ORIGINS: https://${APP_DOMAIN},https://${ADMIN_DOMAIN}
-      DASHBOARD_CLIENT_URL: https://${APP_DOMAIN}
+      CORS_ORIGINS: https://nutribot.alcurro.es
+      DASHBOARD_CLIENT_URL: https://nutribot.alcurro.es
     depends_on:
-      db:
+      nutribot-db:
         condition: service_healthy
       embeddings:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - hrm-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nutribot-api.rule=Host(`nutribot.alcurro.es`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.nutribot-api.entrypoints=websecure"
+      - "traefik.http.routers.nutribot-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.nutribot-api.priority=20"
+      - "traefik.http.services.nutribot-api.loadbalancer.server.port=8000"
 
+  # ── BOT DE TELEGRAM ─────────────────────────────────────────────────────
   bot:
     build: ./bot
+    container_name: nutribot-bot
     env_file:
       - .env
     environment:
-      BACKEND_URL: http://backend:8000
-      DASHBOARD_CLIENT_URL: https://${APP_DOMAIN}
+      BACKEND_URL: http://nutribot-api:8000
+      DASHBOARD_CLIENT_URL: https://nutribot.alcurro.es
     depends_on:
-      - backend
+      - nutribot-api
     restart: unless-stopped
+    networks:
+      - hrm-net
 
+  # ── DASHBOARD CLIENTE (SPA servida por nginx) ───────────────────────────
   dashboard-client:
     build:
       context: ./dashboard-client
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_URL: https://${API_DOMAIN}/api/v1
+        VITE_API_URL: https://nutribot.alcurro.es/api/v1
+    container_name: nutribot-client
     restart: unless-stopped
+    networks:
+      - hrm-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nutribot-client.rule=Host(`nutribot.alcurro.es`)"
+      - "traefik.http.routers.nutribot-client.entrypoints=websecure"
+      - "traefik.http.routers.nutribot-client.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.nutribot-client.priority=10"
+      - "traefik.http.services.nutribot-client.loadbalancer.server.port=80"
 
+  # ── DASHBOARD ADMIN (SPA en /admin, servida por nginx) ──────────────────
   dashboard-admin:
     build:
       context: ./dashboard-admin
       dockerfile: Dockerfile.prod
       args:
-        VITE_API_URL: https://${API_DOMAIN}/api/v1
+        VITE_API_URL: https://nutribot.alcurro.es/api/v1
+    container_name: nutribot-admin
     restart: unless-stopped
-
-  caddy:
-    image: caddy:2
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
-      API_DOMAIN: ${API_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - backend
-      - dashboard-client
-      - dashboard-admin
-    restart: unless-stopped
+    networks:
+      - hrm-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nutribot-admin.rule=Host(`nutribot.alcurro.es`) && PathPrefix(`/admin`)"
+      - "traefik.http.routers.nutribot-admin.entrypoints=websecure"
+      - "traefik.http.routers.nutribot-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.nutribot-admin.priority=20"
+      - "traefik.http.middlewares.nutribot-admin-strip.stripprefix.prefixes=/admin"
+      - "traefik.http.routers.nutribot-admin.middlewares=nutribot-admin-strip"
+      - "traefik.http.services.nutribot-admin.loadbalancer.server.port=80"
 
 volumes:
-  pgdata:
-  tei_data:
-  caddy_data:
-  caddy_config:
+  nutribot_pgdata:
+  nutribot_tei_data:
+
+networks:
+  hrm-net:
+    external: true

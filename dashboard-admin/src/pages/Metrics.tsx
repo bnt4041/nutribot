@@ -11,11 +11,14 @@ import {
 import { api } from "../api/client";
 import { UsageMetrics } from "../types";
 
-function Card({ label, value }: { label: string; value: string }) {
+function Card({ label, value, icon }: { label: string; value: string; icon: string }) {
   return (
-    <div className="rounded-xl bg-white p-5 shadow">
-      <div className="text-sm text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-bold">{value}</div>
+    <div className="card group">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-2xl">{icon}</span>
+        <span className="text-sm font-medium text-gray-500">{label}</span>
+      </div>
+      <div className="text-3xl font-extrabold text-gray-900">{value}</div>
     </div>
   );
 }
@@ -38,25 +41,48 @@ export default function Metrics() {
   }));
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Métricas (últimos {data.days} días)</h1>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Card label="Tokens totales" value={data.tokens_total.toLocaleString()} />
-        <Card label="Prompt / Completion" value={`${data.tokens_prompt.toLocaleString()} / ${data.tokens_completion.toLocaleString()}`} />
-        <Card label="Coste estimado" value={`$${data.estimated_cost_usd.toFixed(4)}`} />
-        <Card label="Respuestas IA" value={data.assistant_messages.toLocaleString()} />
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+          Métricas
+        </h1>
+        <p className="mt-1 text-sm text-gray-500">Últimos {data.days} días de actividad</p>
       </div>
 
-      <section className="rounded-xl bg-white p-5 shadow">
-        <h2 className="mb-4 font-semibold">Tokens por día</h2>
-        <ResponsiveContainer width="100%" height={260}>
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card label="Tokens totales" value={data.tokens_total.toLocaleString()} icon="🪙" />
+        <Card label="Prompt / Completion" value={`${data.tokens_prompt.toLocaleString()} / ${data.tokens_completion.toLocaleString()}`} icon="📥📤" />
+        <Card label="Coste estimado" value={`$${data.estimated_cost_usd.toFixed(4)}`} icon="💰" />
+        <Card label="Respuestas IA" value={data.assistant_messages.toLocaleString()} icon="🤖" />
+      </div>
+
+      {/* Chart */}
+      <section className="card">
+        <div className="card-header">
+          <span className="text-xl">📊</span>
+          <h2 className="font-bold text-gray-800">Tokens por día</h2>
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
           <BarChart data={chart} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" fontSize={12} />
-            <YAxis fontSize={12} />
-            <Tooltip />
-            <Bar dataKey="tokens" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+            <XAxis dataKey="label" fontSize={12} tick={{ fill: "#9ca3af" }} />
+            <YAxis fontSize={12} tick={{ fill: "#9ca3af" }} />
+            <Tooltip
+              contentStyle={{
+                borderRadius: "12px",
+                border: "none",
+                boxShadow: "0 10px 40px rgba(0,0,0,0.1)",
+              }}
+            />
+            <Bar dataKey="tokens" fill="url(#tokenGradient)" radius={[6, 6, 0, 0]} />
+            <defs>
+              <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#4f46e5" />
+                <stop offset="100%" stopColor="#a78bfa" />
+              </linearGradient>
+            </defs>
           </BarChart>
         </ResponsiveContainer>
         <p className="mt-3 text-xs text-gray-400">

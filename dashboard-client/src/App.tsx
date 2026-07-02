@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Conversations from "./pages/Conversations";
+import Diet from "./pages/Diet";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import Progress from "./pages/Progress";
@@ -18,6 +19,7 @@ export default function App() {
         }
       >
         <Route path="/" element={<Progress />} />
+        <Route path="/dieta" element={<Diet />} />
         <Route path="/perfil" element={<Profile />} />
         <Route path="/conversaciones" element={<Conversations />} />
       </Route>

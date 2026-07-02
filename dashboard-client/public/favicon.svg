@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#16a34a"/>
+  <!-- bowl -->
+  <path d="M14 34h36a4 4 0 0 1-4 4l-2 8a6 6 0 0 1-6 5H26a6 6 0 0 1-6-5l-2-8a4 4 0 0 1-4-4z" fill="#ffffff"/>
+  <!-- leaves -->
+  <path d="M32 31c-3-7-10-9-15-8 1 6 6 11 13 10z" fill="#bbf7d0"/>
+  <path d="M33 31c2-8 9-11 15-10-1 7-7 12-14 11z" fill="#dcfce7"/>
+  <circle cx="30" cy="27" r="3" fill="#f59e0b"/>
+  <circle cx="38" cy="28" r="2.5" fill="#ef4444"/>
+</svg>

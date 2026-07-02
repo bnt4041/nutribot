@@ -7,7 +7,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import MealType
+from app.models.diet_plan import DietPlanItem
+from app.models.enums import DietItemStatus, MealType
 from app.models.food_cache import FoodCache
 from app.models.meal_log import MealLog
 from app.models.nutrition_profile import NutritionProfile
@@ -106,6 +107,24 @@ async def log_meal(
         fat_g=macros["fat_g"],
     )
     db.add(meal)
+    await db.flush()
+
+    # Also create a confirmed DietPlanItem so the meal appears in the Diet section.
+    today = date_cls.today()
+    diet_item = DietPlanItem(
+        user_id=user.id,
+        title=food_name,
+        scheduled_date=today,
+        meal_type=_parse_meal_type(meal_type),
+        description=f"Registrado desde el chat — {food_name}",
+        calories=macros["calories"],
+        protein_g=macros["protein_g"],
+        carbs_g=macros["carbs_g"],
+        fat_g=macros["fat_g"],
+        status=DietItemStatus.CONFIRMED,
+        source="ai",
+    )
+    db.add(diet_item)
     await db.flush()
 
     summary = await daily_summary(db, user)
