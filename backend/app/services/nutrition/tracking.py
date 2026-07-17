@@ -13,6 +13,7 @@ from app.models.food_cache import FoodCache
 from app.models.meal_log import MealLog
 from app.models.nutrition_profile import NutritionProfile
 from app.models.user import User
+from app.models.water_log import WaterLog
 from app.services.nutrition.targets import ensure_targets
 from app.services.openfoodfacts import service as off_service
 
@@ -31,6 +32,7 @@ def scale_macros(per_100g: dict, grams: float) -> dict:
         "protein_g": _s(per_100g.get("protein_100g")),
         "carbs_g": _s(per_100g.get("carbs_100g")),
         "fat_g": _s(per_100g.get("fat_100g")),
+        "fiber_g": _s(per_100g.get("fiber_100g")),
     }
 
 
@@ -61,6 +63,7 @@ async def log_meal(
     protein_g: float | None = None,
     carbs_g: float | None = None,
     fat_g: float | None = None,
+    fiber_g: float | None = None,
 ) -> dict:
     """Record a meal and return a confirmation plus today's running summary.
 
@@ -73,6 +76,7 @@ async def log_meal(
         "protein_g": protein_g,
         "carbs_g": carbs_g,
         "fat_g": fat_g,
+        "fiber_g": fiber_g,
     }
 
     if barcode:
@@ -105,6 +109,7 @@ async def log_meal(
         protein_g=macros["protein_g"],
         carbs_g=macros["carbs_g"],
         fat_g=macros["fat_g"],
+        fiber_g=macros["fiber_g"],
     )
     db.add(meal)
     await db.flush()
@@ -121,6 +126,7 @@ async def log_meal(
         protein_g=macros["protein_g"],
         carbs_g=macros["carbs_g"],
         fat_g=macros["fat_g"],
+        fiber_g=macros["fiber_g"],
         status=DietItemStatus.CONFIRMED,
         source="ai",
     )
@@ -140,7 +146,71 @@ def _meal_to_dict(meal: MealLog) -> dict:
         "protein_g": float(meal.protein_g) if meal.protein_g is not None else None,
         "carbs_g": float(meal.carbs_g) if meal.carbs_g is not None else None,
         "fat_g": float(meal.fat_g) if meal.fat_g is not None else None,
+        "fiber_g": float(meal.fiber_g) if meal.fiber_g is not None else None,
     }
+
+
+async def log_confirmed_diet_item(db: AsyncSession, item: DietPlanItem) -> MealLog | None:
+    """Record a just-confirmed diet-plan item as a meal log entry.
+
+    Without this, confirming a planned meal (by chat or in the dashboard) only
+    flips its status and never counts toward the day's totals/charts, since
+    those are computed from ``MealLog`` alone.
+    """
+    if item.calories is None and item.protein_g is None:
+        return None
+
+    result = await db.execute(
+        select(NutritionProfile).where(NutritionProfile.user_id == item.user_id)
+    )
+    profile = result.scalar_one_or_none()
+    tz_name = profile.timezone if profile and profile.timezone else DEFAULT_TZ
+    tz = ZoneInfo(tz_name)
+
+    day = item.scheduled_date or datetime.now(tz).date()
+    logged_at = datetime.combine(day, item.scheduled_time or time(12, 0), tzinfo=tz)
+
+    meal = MealLog(
+        user_id=item.user_id,
+        food_name=item.title,
+        quantity_g=0,
+        meal_type=item.meal_type,
+        calories=item.calories,
+        protein_g=item.protein_g,
+        carbs_g=item.carbs_g,
+        fat_g=item.fat_g,
+        fiber_g=item.fiber_g,
+        logged_at=logged_at,
+    )
+    db.add(meal)
+    await db.flush()
+    return meal
+
+
+async def log_water(db: AsyncSession, user: User, amount_ml: float) -> dict:
+    """Record water intake and return a confirmation plus today's summary."""
+    if not amount_ml or amount_ml <= 0:
+        return {"logged": False, "message": "La cantidad de agua debe ser mayor que 0 ml."}
+
+    entry = WaterLog(user_id=user.id, amount_ml=amount_ml)
+    db.add(entry)
+    await db.flush()
+
+    summary = await daily_summary(db, user)
+    return {"logged": True, "amount_ml": float(amount_ml), "daily_summary": summary}
+
+
+async def _water_total(
+    db: AsyncSession, user: User, start: datetime, end: datetime
+) -> float:
+    result = await db.execute(
+        select(WaterLog).where(
+            WaterLog.user_id == user.id,
+            WaterLog.logged_at >= start,
+            WaterLog.logged_at < end,
+        )
+    )
+    return sum(float(w.amount_ml) for w in result.scalars().all())
 
 
 async def history(db: AsyncSession, user: User, days: int = 14) -> list[dict]:
@@ -158,11 +228,24 @@ async def history(db: AsyncSession, user: User, days: int = 14) -> list[dict]:
         .where(MealLog.user_id == user.id, MealLog.logged_at >= start)
         .order_by(MealLog.logged_at)
     )
-    # Bucket meals by local date.
+    water_result = await db.execute(
+        select(WaterLog)
+        .where(WaterLog.user_id == user.id, WaterLog.logged_at >= start)
+        .order_by(WaterLog.logged_at)
+    )
+    # Bucket meals (and water) by local date.
     buckets: dict[str, dict] = {}
     for i in range(days):
         d = (start_date + timedelta(days=i)).isoformat()
-        buckets[d] = {"date": d, "calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+        buckets[d] = {
+            "date": d,
+            "calories": 0.0,
+            "protein_g": 0.0,
+            "carbs_g": 0.0,
+            "fat_g": 0.0,
+            "fiber_g": 0.0,
+            "water_ml": 0.0,
+        }
     for meal in result.scalars().all():
         local_date = meal.logged_at.astimezone(tz).date().isoformat()
         bucket = buckets.get(local_date)
@@ -172,6 +255,13 @@ async def history(db: AsyncSession, user: User, days: int = 14) -> list[dict]:
         bucket["protein_g"] += float(meal.protein_g or 0)
         bucket["carbs_g"] += float(meal.carbs_g or 0)
         bucket["fat_g"] += float(meal.fat_g or 0)
+        bucket["fiber_g"] += float(meal.fiber_g or 0)
+    for water in water_result.scalars().all():
+        local_date = water.logged_at.astimezone(tz).date().isoformat()
+        bucket = buckets.get(local_date)
+        if bucket is None:
+            continue
+        bucket["water_ml"] += float(water.amount_ml or 0)
     return [
         {k: (round(v, 1) if isinstance(v, float) else v) for k, v in b.items()}
         for b in buckets.values()
@@ -200,30 +290,35 @@ async def daily_summary(
         .order_by(MealLog.logged_at)
     )
     meals = list(result.scalars().all())
+    water_total = await _water_total(db, user, start, end)
 
-    totals = {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0}
+    totals = {"calories": 0.0, "protein_g": 0.0, "carbs_g": 0.0, "fat_g": 0.0, "fiber_g": 0.0}
     for meal in meals:
         totals["calories"] += float(meal.calories or 0)
         totals["protein_g"] += float(meal.protein_g or 0)
         totals["carbs_g"] += float(meal.carbs_g or 0)
         totals["fat_g"] += float(meal.fat_g or 0)
+        totals["fiber_g"] += float(meal.fiber_g or 0)
     totals = {k: round(v, 1) for k, v in totals.items()}
 
     targets = await ensure_targets(db, profile) if profile else None
     targets_dict = None
     remaining = None
+    water_target = targets.water_ml if targets is not None else None
     if targets is not None:
         targets_dict = {
             "calories": targets.calories,
             "protein_g": targets.protein_g,
             "carbs_g": targets.carbs_g,
             "fat_g": targets.fat_g,
+            "fiber_g": targets.fiber_g,
         }
         remaining = {
             "calories": round(targets.calories - totals["calories"], 1),
             "protein_g": round(targets.protein_g - totals["protein_g"], 1),
             "carbs_g": round(targets.carbs_g - totals["carbs_g"], 1),
             "fat_g": round(targets.fat_g - totals["fat_g"], 1),
+            "fiber_g": round(targets.fiber_g - totals["fiber_g"], 1),
         }
 
     return {
@@ -232,5 +327,10 @@ async def daily_summary(
         "totals": totals,
         "targets": targets_dict,
         "remaining": remaining,
+        "water_ml": round(water_total, 1),
+        "water_target_ml": water_target,
+        "water_remaining_ml": (
+            round(water_target - water_total, 1) if water_target else None
+        ),
         "meals": [_meal_to_dict(m) for m in meals],
     }

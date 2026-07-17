@@ -13,11 +13,14 @@ from app.models.enums import UserRole
 from app.models.legal import LegalDocument
 from app.models.user import User
 from app.schemas.admin import (
+    AppSettingsOut,
+    AppSettingsUpdateIn,
     LegalDocCreateIn,
     LegalDocOut,
     UserAdminOut,
     UserUpdateIn,
 )
+from app.services import app_settings as app_settings_service
 from app.services import metrics
 
 router = APIRouter(
@@ -28,18 +31,31 @@ router = APIRouter(
 
 
 # --- Users ---
+def _with_usage(user: User, summary: dict) -> UserAdminOut:
+    row = summary.get(user.id, {})
+    return UserAdminOut(
+        **UserAdminOut.model_validate(user).model_dump(exclude={"last_message_at", "tokens_total", "estimated_cost_usd"}),
+        last_message_at=row.get("last_message_at"),
+        tokens_total=row.get("tokens_total", 0),
+        estimated_cost_usd=row.get("estimated_cost_usd", 0.0),
+    )
+
+
 @router.get("/users", response_model=list[UserAdminOut])
-async def list_users(db: AsyncSession = Depends(get_db)) -> list[User]:
+async def list_users(db: AsyncSession = Depends(get_db)) -> list[UserAdminOut]:
     result = await db.execute(select(User).order_by(User.id))
-    return list(result.scalars().all())
+    users = list(result.scalars().all())
+    summary = await metrics.per_user_summary(db)
+    return [_with_usage(u, summary) for u in users]
 
 
 @router.get("/users/{user_id}", response_model=UserAdminOut)
-async def get_user(user_id: int, db: AsyncSession = Depends(get_db)) -> User:
+async def get_user(user_id: int, db: AsyncSession = Depends(get_db)) -> UserAdminOut:
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
-    return user
+    summary = await metrics.per_user_summary(db)
+    return _with_usage(user, summary)
 
 
 @router.patch("/users/{user_id}", response_model=UserAdminOut)
@@ -56,6 +72,25 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+# --- Settings ---
+@router.get("/settings", response_model=AppSettingsOut)
+async def get_app_settings(db: AsyncSession = Depends(get_db)) -> AppSettingsOut:
+    settings = await app_settings_service.get_settings(db)
+    await db.commit()
+    return settings
+
+
+@router.patch("/settings", response_model=AppSettingsOut)
+async def update_app_settings(
+    payload: AppSettingsUpdateIn, db: AsyncSession = Depends(get_db)
+) -> AppSettingsOut:
+    settings = await app_settings_service.update_settings(
+        db, **payload.model_dump(exclude_unset=True)
+    )
+    await db.commit()
+    return settings
 
 
 # --- Metrics ---

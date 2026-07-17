@@ -27,6 +27,9 @@ PROTEIN_PER_KG: dict[Goal, float] = {
 FAT_CALORIE_FRACTION = 0.25  # 25% of calories from fat
 KCAL_PER_KG = 7700  # approx energy in 1 kg of body mass
 CALORIE_FLOOR = 1200  # never recommend below this
+FIBER_PER_1000_KCAL = 14.0  # g fiber per 1000 kcal (Institute of Medicine guideline)
+FIBER_FLOOR = 25.0  # never recommend below this
+WATER_ML_PER_KG = 35  # ml of water per kg of bodyweight
 
 
 @dataclass
@@ -35,6 +38,8 @@ class Targets:
     protein_g: float
     carbs_g: float
     fat_g: float
+    fiber_g: float
+    water_ml: int
 
 
 def _age(birth: date) -> int:
@@ -82,23 +87,42 @@ def compute_targets(profile: NutritionProfile) -> Targets | None:
     fat_g = (calories * FAT_CALORIE_FRACTION) / 9
     remaining = calories - (protein_g * 4 + fat_g * 9)
     carbs_g = max(remaining / 4, 0.0)
+    fiber_g = max(calories / 1000 * FIBER_PER_1000_KCAL, FIBER_FLOOR)
+    water_ml = weight * WATER_ML_PER_KG
 
     return Targets(
         calories=round(calories),
         protein_g=round(protein_g, 1),
         carbs_g=round(carbs_g, 1),
         fat_g=round(fat_g, 1),
+        fiber_g=round(fiber_g, 1),
+        water_ml=round(water_ml),
     )
 
 
 async def ensure_targets(db: AsyncSession, profile: NutritionProfile) -> Targets | None:
-    """Compute and persist targets if missing; return them either way."""
-    if profile.target_calories is not None:
+    """Compute and persist targets if missing; return them either way.
+
+    All cached fields must be present to use the fast path — if a target was
+    added after the profile's targets were first cached (e.g. fiber/water),
+    only the older fields would be set, so we fall through and recompute.
+    """
+    cached_fields = (
+        profile.target_calories,
+        profile.target_protein_g,
+        profile.target_carbs_g,
+        profile.target_fat_g,
+        profile.target_fiber_g,
+        profile.target_water_ml,
+    )
+    if all(f is not None for f in cached_fields):
         return Targets(
             calories=profile.target_calories,
-            protein_g=float(profile.target_protein_g or 0),
-            carbs_g=float(profile.target_carbs_g or 0),
-            fat_g=float(profile.target_fat_g or 0),
+            protein_g=float(profile.target_protein_g),
+            carbs_g=float(profile.target_carbs_g),
+            fat_g=float(profile.target_fat_g),
+            fiber_g=float(profile.target_fiber_g),
+            water_ml=profile.target_water_ml,
         )
     targets = compute_targets(profile)
     if targets is None:
@@ -107,6 +131,8 @@ async def ensure_targets(db: AsyncSession, profile: NutritionProfile) -> Targets
     profile.target_protein_g = targets.protein_g
     profile.target_carbs_g = targets.carbs_g
     profile.target_fat_g = targets.fat_g
+    profile.target_fiber_g = targets.fiber_g
+    profile.target_water_ml = targets.water_ml
     await db.flush()
     return targets
 
@@ -121,4 +147,6 @@ async def recompute_targets(db: AsyncSession, profile: NutritionProfile) -> Targ
     profile.target_protein_g = None
     profile.target_carbs_g = None
     profile.target_fat_g = None
+    profile.target_fiber_g = None
+    profile.target_water_ml = None
     return await ensure_targets(db, profile)

@@ -8,6 +8,8 @@ from app.models.enums import DietItemStatus
 from app.models.user import User
 from app.services import preferences
 from app.services import profile as profile_service
+from app.services import reminders as reminders_service
+from app.services.reminders import ReminderValidationError
 from app.services.nutrition import diet_plan, tracking
 from app.services.openfoodfacts import service as off_service
 
@@ -89,8 +91,30 @@ FOOD_TOOLS: list[dict] = [
                     "protein_g": {"type": "number", "description": "Proteína (g) total."},
                     "carbs_g": {"type": "number", "description": "Carbohidratos (g) total."},
                     "fat_g": {"type": "number", "description": "Grasa (g) total."},
+                    "fiber_g": {"type": "number", "description": "Fibra (g) total."},
                 },
                 "required": ["food_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "log_water",
+            "description": (
+                "Registra el agua que el usuario dice haber bebido. Convierte a ml: "
+                "un vaso ≈ 200 ml, una botella pequeña ≈ 500 ml, un litro = 1000 ml. "
+                "Úsala cada vez que el usuario mencione haber bebido agua."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount_ml": {
+                        "type": "number",
+                        "description": "Cantidad de agua en mililitros.",
+                    },
+                },
+                "required": ["amount_ml"],
             },
         },
     },
@@ -224,6 +248,7 @@ FOOD_TOOLS: list[dict] = [
                     "protein_g": {"type": "number"},
                     "carbs_g": {"type": "number"},
                     "fat_g": {"type": "number"},
+                    "fiber_g": {"type": "number"},
                 },
                 "required": ["title"],
             },
@@ -253,6 +278,7 @@ FOOD_TOOLS: list[dict] = [
                     "protein_g": {"type": "number"},
                     "carbs_g": {"type": "number"},
                     "fat_g": {"type": "number"},
+                    "fiber_g": {"type": "number"},
                 },
                 "required": ["item_id"],
             },
@@ -270,15 +296,144 @@ FOOD_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reminders",
+            "description": (
+                "Devuelve los recordatorios/avisos activos del usuario (comida, "
+                "agua, peso, noticias de nutrición o personalizados), con su hora "
+                "y días. Úsala antes de crear uno nuevo para no duplicar, y "
+                "cuando pregunte qué recordatorios tiene."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_reminder",
+            "description": (
+                "Crea un recordatorio/aviso que se enviará por Telegram a la hora "
+                "indicada. Usa type='meal'/'water'/'weight' para los avisos "
+                "predefinidos (registrar comidas, beber agua, pesarse), "
+                "type='news' para recibir una noticia de nutrición/salud "
+                "distinta cada vez que suena (se busca en el momento, no hace "
+                "falta 'message'), o type='custom' con un texto libre en "
+                "'message' para cualquier otra cosa (ej. 'tómate la vitamina'). "
+                "Sin days_of_week se repite todos los días."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["meal", "water", "weight", "news", "custom"],
+                    },
+                    "time": {
+                        "type": "string",
+                        "description": "Hora local HH:MM a la que avisar.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Texto del aviso; obligatorio si type='custom'.",
+                    },
+                    "days_of_week": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "0=Lunes … 6=Domingo; vacío/omitido = todos los días.",
+                    },
+                },
+                "required": ["type", "time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_reminder",
+            "description": (
+                "Modifica un recordatorio por su id (obtenlo con list_reminders): "
+                "cambia su hora, días, mensaje o si está activo."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reminder_id": {"type": "integer"},
+                    "time": {"type": "string", "description": "Hora HH:MM."},
+                    "message": {"type": "string"},
+                    "days_of_week": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "0=Lunes … 6=Domingo.",
+                    },
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["reminder_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_reminder",
+            "description": "Elimina un recordatorio por su id (obtenlo con list_reminders).",
+            "parameters": {
+                "type": "object",
+                "properties": {"reminder_id": {"type": "integer"}},
+                "required": ["reminder_id"],
+            },
+        },
+    },
 ]
+
+# Only offered to the model on turns where the user actually attached a photo
+# (see chat.handle_message); the image bytes are bound into the executor, not
+# passed as an argument, since the model never sees raw image data.
+PHOTO_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "analyze_food_photo",
+        "description": (
+            "Analiza con IA de visión (Gemini) la foto de comida o bebida que "
+            "el usuario acaba de enviar, usando el contexto reciente de la "
+            "conversación para interpretarla mejor. Identifica el plato y "
+            "estima sus macronutrientes. Llámala siempre que haya una foto "
+            "adjunta, antes de responder — no asumas qué contiene sin "
+            "comprobarlo."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
 
 
 def make_food_tool_executor(
-    db: AsyncSession, user: User
+    db: AsyncSession,
+    user: User,
+    image_base64: str | None = None,
+    image_mime: str | None = None,
+    conversation_context: str | None = None,
 ) -> Callable[[str, dict], Awaitable[object]]:
-    """Bind the tools to a database session and the current user."""
+    """Bind the tools to a database session and the current user.
+
+    ``image_base64``/``image_mime`` bind the current turn's attached photo (if
+    any) so the ``analyze_food_photo`` tool can send it to Gemini Vision;
+    ``conversation_context`` is the recent chat history, passed along so
+    Gemini's analysis isn't blind to what was already discussed.
+    """
 
     async def execute(name: str, arguments: dict) -> object:
+        if name == "analyze_food_photo":
+            if not image_base64:
+                return {"error": "no hay ninguna foto adjunta en este turno"}
+            from app.services.deepseek.vision import analyze_food_image
+
+            analysis = await analyze_food_image(
+                image_base64,
+                image_mime or "image/jpeg",
+                conversation_context=conversation_context,
+            )
+            return {"analysis": analysis}
         if name == "search_food_by_name":
             query = (arguments.get("name") or "").strip()
             if not query:
@@ -306,7 +461,13 @@ def make_food_tool_executor(
                 protein_g=arguments.get("protein_g"),
                 carbs_g=arguments.get("carbs_g"),
                 fat_g=arguments.get("fat_g"),
+                fiber_g=arguments.get("fiber_g"),
             )
+        if name == "log_water":
+            amount_ml = arguments.get("amount_ml")
+            if not amount_ml:
+                return {"error": "missing 'amount_ml'"}
+            return await tracking.log_water(db, user, amount_ml=amount_ml)
         if name == "get_daily_summary":
             return await tracking.daily_summary(db, user)
         if name == "remember_preference":
@@ -358,6 +519,7 @@ def make_food_tool_executor(
                 protein_g=arguments.get("protein_g"),
                 carbs_g=arguments.get("carbs_g"),
                 fat_g=arguments.get("fat_g"),
+                fiber_g=arguments.get("fiber_g"),
                 status=DietItemStatus.PROPOSED,
                 source="ai",
             )
@@ -376,6 +538,45 @@ def make_food_tool_executor(
             if item is None:
                 return {"error": "item no encontrado"}
             await diet_plan.delete_item(db, item)
+            return {"removed": True}
+        if name == "list_reminders":
+            items = await reminders_service.list_reminders(db, user)
+            return {"reminders": [reminders_service.reminder_to_dict(r) for r in items]}
+        if name == "create_reminder":
+            try:
+                reminder = await reminders_service.create_reminder(
+                    db,
+                    user,
+                    type=arguments.get("type"),
+                    time=arguments.get("time"),
+                    message=arguments.get("message"),
+                    days_of_week=arguments.get("days_of_week"),
+                    source="ai",
+                )
+            except ReminderValidationError as exc:
+                return {"error": str(exc)}
+            return {"created": True, "reminder": reminders_service.reminder_to_dict(reminder)}
+        if name == "update_reminder":
+            reminder_id = arguments.get("reminder_id")
+            reminder = (
+                await reminders_service.get_reminder(db, user, reminder_id) if reminder_id else None
+            )
+            if reminder is None:
+                return {"error": "recordatorio no encontrado"}
+            fields = {k: v for k, v in arguments.items() if k != "reminder_id"}
+            try:
+                reminder = await reminders_service.update_reminder(db, reminder, **fields)
+            except ReminderValidationError as exc:
+                return {"error": str(exc)}
+            return {"updated": True, "reminder": reminders_service.reminder_to_dict(reminder)}
+        if name == "remove_reminder":
+            reminder_id = arguments.get("reminder_id")
+            reminder = (
+                await reminders_service.get_reminder(db, user, reminder_id) if reminder_id else None
+            )
+            if reminder is None:
+                return {"error": "recordatorio no encontrado"}
+            await reminders_service.delete_reminder(db, reminder)
             return {"removed": True}
         return {"error": f"unknown tool: {name}"}
 

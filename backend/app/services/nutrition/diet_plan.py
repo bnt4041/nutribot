@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.diet_plan import DietPlanItem
 from app.models.enums import DietItemStatus, MealType
 from app.models.user import User
+from app.services.nutrition import tracking
 
 DAYS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 MEAL_ES = {
@@ -120,6 +121,7 @@ async def add_item(
     protein_g=None,
     carbs_g=None,
     fat_g=None,
+    fiber_g=None,
     status: DietItemStatus = DietItemStatus.PROPOSED,
     source: str = "ai",
 ) -> DietPlanItem:
@@ -134,11 +136,14 @@ async def add_item(
         protein_g=_to_decimal(protein_g),
         carbs_g=_to_decimal(carbs_g),
         fat_g=_to_decimal(fat_g),
+        fiber_g=_to_decimal(fiber_g),
         status=status,
         source=source,
     )
     db.add(item)
     await db.flush()
+    if item.status == DietItemStatus.CONFIRMED:
+        await tracking.log_confirmed_diet_item(db, item)
     return item
 
 
@@ -164,13 +169,16 @@ async def update_item(db: AsyncSession, item: DietPlanItem, **fields) -> DietPla
         item.meal_type = _to_meal_type(fields["meal_type"])
     if "scheduled_time" in fields:
         item.scheduled_time = _to_time(fields["scheduled_time"])
-    for macro in ("calories", "protein_g", "carbs_g", "fat_g"):
+    for macro in ("calories", "protein_g", "carbs_g", "fat_g", "fiber_g"):
         if macro in fields:
             setattr(item, macro, _to_decimal(fields[macro]))
+    was_confirmed = item.status == DietItemStatus.CONFIRMED
     if fields.get("status") is not None:
         status = fields["status"]
         item.status = status if isinstance(status, DietItemStatus) else DietItemStatus(str(status).lower())
     await db.flush()
+    if item.status == DietItemStatus.CONFIRMED and not was_confirmed:
+        await tracking.log_confirmed_diet_item(db, item)
     return item
 
 
@@ -191,6 +199,7 @@ def item_to_dict(item: DietPlanItem) -> dict:
         "protein_g": float(item.protein_g) if item.protein_g is not None else None,
         "carbs_g": float(item.carbs_g) if item.carbs_g is not None else None,
         "fat_g": float(item.fat_g) if item.fat_g is not None else None,
+        "fiber_g": float(item.fiber_g) if item.fiber_g is not None else None,
         "status": item.status.value,
         "source": item.source,
     }

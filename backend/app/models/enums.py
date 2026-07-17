@@ -67,3 +67,13 @@ class DocumentStatus(str, enum.Enum):
 class LegalDocType(str, enum.Enum):
     TERMS = "terms"
     PRIVACY = "privacy"
+
+
+class ReminderType(str, enum.Enum):
+    """Kind of recurring notification the user gets over Telegram."""
+
+    MEAL = "meal"  # nudge to log today's meals
+    WATER = "water"  # nudge to drink/log water
+    WEIGHT = "weight"  # nudge to log current weight
+    CUSTOM = "custom"  # free-form reminder text set by the user/AI
+    NEWS = "news"  # nutrition/health headline fetched live when it fires

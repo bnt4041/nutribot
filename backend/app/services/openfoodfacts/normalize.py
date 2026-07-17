@@ -50,6 +50,7 @@ def normalize_product(product: dict) -> dict | None:
     protein = _to_decimal(nutriments.get("proteins_100g"))
     carbs = _to_decimal(nutriments.get("carbohydrates_100g"))
     fat = _to_decimal(nutriments.get("fat_100g"))
+    fiber = _to_decimal(nutriments.get("fiber_100g"))
 
     image_url = product.get("image_front_url") or product.get("image_url") or None
 
@@ -60,6 +61,7 @@ def normalize_product(product: dict) -> dict | None:
         "protein_100g": float(protein) if protein is not None else None,
         "carbs_100g": float(carbs) if carbs is not None else None,
         "fat_100g": float(fat) if fat is not None else None,
+        "fiber_100g": float(fiber) if fiber is not None else None,
         "url": product_url(barcode),
         "image_url": image_url,
     }

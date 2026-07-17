@@ -45,6 +45,7 @@ class DietPlanItem(Base, TimestampMixin):
     protein_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     carbs_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     fat_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    fiber_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
 
     status: Mapped[DietItemStatus] = mapped_column(
         Enum(DietItemStatus, name="diet_item_status"),

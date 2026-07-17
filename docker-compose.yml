@@ -68,6 +68,26 @@ services:
       - backend
     restart: unless-stopped
 
+  cron:
+    # Same image as "backend" (reminders script + crontab are baked into it);
+    # only the command differs — runs the OS cron daemon in the foreground.
+    build: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://nutribot:nutribot@db:5432/nutribot}
+    volumes:
+      # cron spawns each job with a stripped environment (env_file/-e vars
+      # aren't inherited), so Settings() can't see them via os.environ. Mount
+      # .env itself so pydantic-settings' env_file=".env" fallback reads it
+      # straight from disk when the job process starts.
+      - ./.env:/app/.env:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["cron", "-f"]
+    restart: unless-stopped
+
   dashboard-client:
     build: ./dashboard-client
     environment:

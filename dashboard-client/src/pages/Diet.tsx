@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { StatCard } from "../components/StatCard";
 import { DietPlanItem } from "../types";
 
 const DAYS_FULL = [
@@ -122,6 +123,11 @@ function ItemCard({
                 G {Math.round(item.fat_g)}g
               </span>
             )}
+            {item.fiber_g != null && (
+              <span className="rounded-lg bg-lime-50 px-2 py-1 font-semibold text-lime-700">
+                Fibra {Math.round(item.fiber_g)}g
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -184,6 +190,29 @@ export default function Diet() {
 
   const itemsForDate = (d: Date): DietPlanItem[] =>
     sortItems(byDate.get(toISO(d)) ?? []);
+
+  // Indicators for the header: scoped to the week the calendar is currently showing.
+  const weekStats = useMemo(() => {
+    const start = startOfWeek(anchor);
+    const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    let total = 0;
+    let confirmed = 0;
+    let kcal = 0;
+    for (const d of days) {
+      for (const it of itemsForDate(d)) {
+        total++;
+        if (it.status === "confirmed") confirmed++;
+        if (it.calories != null) kcal += it.calories;
+      }
+    }
+    return {
+      total,
+      confirmed,
+      proposed: total - confirmed,
+      kcal: Math.round(kcal),
+      adherence: total ? Math.round((confirmed / total) * 100) : 0,
+    };
+  }, [anchor, byDate]);
 
   const confirm = async (item: DietPlanItem) => {
     const { data } = await api.patch<DietPlanItem>(`/me/diet-plan/${item.id}`, {
@@ -256,6 +285,38 @@ export default function Diet() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Weekly indicators */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard
+          icon="🍽️"
+          label="Semana"
+          value={`${weekStats.total} comida${weekStats.total === 1 ? "" : "s"}`}
+          sub="planificadas"
+          accent="#16a34a"
+        />
+        <StatCard
+          icon="✅"
+          label="Confirmadas"
+          value={`${weekStats.confirmed} (${weekStats.adherence}%)`}
+          sub="de la semana"
+          accent="#16a34a"
+        />
+        <StatCard
+          icon="⏳"
+          label="Pendientes"
+          value={`${weekStats.proposed}`}
+          sub="por confirmar"
+          accent="#f59e0b"
+        />
+        <StatCard
+          icon="🔥"
+          label="Kcal planificadas"
+          value={weekStats.kcal > 0 ? `${weekStats.kcal.toLocaleString("es-ES")}` : "—"}
+          sub="esta semana"
+          accent="#16a34a"
+        />
       </div>
 
       {/* Navigation bar */}

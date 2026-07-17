@@ -7,6 +7,14 @@ export interface AdminUser {
   is_active: boolean;
   onboarding_completed_at: string | null;
   created_at: string;
+  last_message_at: string | null;
+  tokens_total: number;
+  estimated_cost_usd: number;
+}
+
+export interface AppSettings {
+  inactivity_reminder_enabled: boolean;
+  inactivity_reminder_days: number;
 }
 
 export interface UsagePoint {

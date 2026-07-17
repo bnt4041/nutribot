@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -17,7 +17,9 @@ if TYPE_CHECKING:
     from app.models.legal import UserConsent
     from app.models.meal_log import MealLog
     from app.models.nutrition_profile import NutritionProfile
+    from app.models.reminder import Reminder
     from app.models.user_note import UserNote
+    from app.models.water_log import WaterLog
     from app.models.weight_log import WeightLog
 
 
@@ -46,6 +48,18 @@ class User(Base, TimestampMixin):
     onboarding_completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Last time we sent an inactivity nudge/farewell; prevents resending it
+    # every cron tick while the user stays inactive (only fires again once
+    # they've chatted and gone silent again, which resets the counter below).
+    last_inactivity_nudge_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # How many inactivity messages sent this silent streak: 1-3 are nudges
+    # (one per `inactivity_reminder_days` multiple), 4 is the one-time
+    # farewell after which we stop messaging until the user chats again.
+    inactivity_nudge_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
 
     profile: Mapped["NutritionProfile | None"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -59,10 +73,16 @@ class User(Base, TimestampMixin):
     weight_logs: Mapped[list["WeightLog"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    water_logs: Mapped[list["WaterLog"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     diet_plan_items: Mapped[list["DietPlanItem"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     notes: Mapped[list["UserNote"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    reminders: Mapped[list["Reminder"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     consents: Mapped[list["UserConsent"]] = relationship(

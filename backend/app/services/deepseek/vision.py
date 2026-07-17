@@ -18,12 +18,21 @@ _FOOD_ANALYSIS_PROMPT = """Analiza esta foto de comida o bebida. Responde en esp
 - Proteina: [X]g
 - Carbohidratos: [X]g
 - Grasa: [X]g
+- Fibra: [X]g
 
 Sé breve y honesto. Si no puedes identificar algo, di "No estoy seguro". Usa rangos cuando no puedas precisar."""
 
 
-async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -> str:
+async def analyze_food_image(
+    image_base64: str,
+    mime_type: str = "image/jpeg",
+    conversation_context: str | None = None,
+) -> str:
     """Send a food photo to Gemini 2.0 Flash and return the analysis text.
+
+    ``conversation_context`` — recent chat turns, if any — is prepended so
+    Gemini can use what the user already said (e.g. "es la cena de ayer",
+    "esto lo compré en el super") instead of guessing from the pixels alone.
 
     Returns a plain-text analysis suitable for Telegram display.
     """
@@ -39,11 +48,19 @@ async def analyze_food_image(image_base64: str, mime_type: str = "image/jpeg") -
         f"?key={settings.gemini_api_key}"
     )
 
+    prompt = _FOOD_ANALYSIS_PROMPT
+    if conversation_context:
+        prompt = (
+            "Contexto: fragmento reciente de la conversación con el usuario "
+            f"(puede ser irrelevante para esta foto, ignóralo si no aplica):\n"
+            f"{conversation_context}\n\n{_FOOD_ANALYSIS_PROMPT}"
+        )
+
     payload = {
         "contents": [
             {
                 "parts": [
-                    {"text": _FOOD_ANALYSIS_PROMPT},
+                    {"text": prompt},
                     {
                         "inline_data": {
                             "mime_type": mime_type,

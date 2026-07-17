@@ -19,12 +19,15 @@ class ProfileOut(BaseModel):
     activity_level: str | None
     goal: str | None
     timezone: str | None
+    reminders_enabled: bool
     dietary_restrictions: list[str]
     allergies: list[str]
     target_calories: int | None
     target_protein_g: float | None
     target_carbs_g: float | None
     target_fat_g: float | None
+    target_fiber_g: float | None
+    target_water_ml: int | None
 
 
 class ProfileUpdateIn(BaseModel):
@@ -56,6 +59,7 @@ class DietPlanItemOut(BaseModel):
     protein_g: float | None
     carbs_g: float | None
     fat_g: float | None
+    fiber_g: float | None
     status: str
     source: str
 
@@ -72,6 +76,7 @@ class DietPlanItemCreate(BaseModel):
     protein_g: float | None = None
     carbs_g: float | None = None
     fat_g: float | None = None
+    fiber_g: float | None = None
     status: str | None = None
 
 
@@ -86,7 +91,34 @@ class DietPlanItemUpdate(BaseModel):
     protein_g: float | None = None
     carbs_g: float | None = None
     fat_g: float | None = None
+    fiber_g: float | None = None
     status: str | None = None
+
+
+class ReminderOut(BaseModel):
+    id: int
+    type: str
+    message: str | None
+    time: str
+    days_of_week: list[int]
+    enabled: bool
+    source: str
+
+
+class ReminderCreate(BaseModel):
+    type: str
+    time: str
+    message: str | None = None
+    days_of_week: list[int] | None = None
+    enabled: bool = True
+
+
+class ReminderUpdate(BaseModel):
+    type: str | None = None
+    time: str | None = None
+    message: str | None = None
+    days_of_week: list[int] | None = None
+    enabled: bool | None = None
 
 
 class NoteOut(BaseModel):
@@ -104,6 +136,15 @@ class NoteCreate(BaseModel):
 class WeightPointOut(BaseModel):
     logged_at: datetime
     weight_kg: float
+
+
+class WaterPointOut(BaseModel):
+    logged_at: datetime
+    amount_ml: float
+
+
+class WaterLogCreate(BaseModel):
+    amount_ml: float = Field(gt=0)
 
 
 class ConversationOut(BaseModel):

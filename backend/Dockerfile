@@ -1,9 +1,11 @@
 # Backend image: Python 3.12 + uv for dependency management
 FROM python:3.12-slim
 
-# Install system deps (DejaVu fonts for PDF reports with Unicode/emoji support)
+# Install system deps: DejaVu fonts for PDF reports (Unicode/emoji support),
+# cron to run the reminders job (the "cron" compose service reuses this image).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv (fast Python package manager)
@@ -29,6 +31,11 @@ COPY sample_docs ./sample_docs
 
 # Install the project itself
 RUN uv sync
+
+# Reminders cron job: only active in the "cron" compose service (which
+# overrides CMD to `cron -f`); harmless in the API container otherwise.
+COPY crontab /etc/cron.d/nutribot-cron
+RUN chmod 0644 /etc/cron.d/nutribot-cron && crontab /etc/cron.d/nutribot-cron
 
 EXPOSE 8000
 

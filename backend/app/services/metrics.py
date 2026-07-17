@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.conversation import Message
+from app.models.conversation import Conversation, Message
+from app.models.enums import MessageRole
 
 settings = get_settings()
 
@@ -76,4 +77,33 @@ async def usage(db: AsyncSession, days: int = 30) -> dict:
             "output": settings.deepseek_price_output_per_mtok,
         },
         "series": series,
+    }
+
+
+async def per_user_summary(db: AsyncSession) -> dict[int, dict]:
+    """Per-user token consumption and last time they wrote to the bot.
+
+    Used by the admin users table (personal token usage) and by the
+    inactivity nudge (last_message_at) to find users who've gone quiet.
+    """
+    rows = (
+        await db.execute(
+            select(
+                Conversation.user_id,
+                func.max(Message.created_at).filter(Message.role == MessageRole.USER),
+                func.coalesce(func.sum(Message.tokens_prompt), 0),
+                func.coalesce(func.sum(Message.tokens_completion), 0),
+            )
+            .select_from(Conversation)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .group_by(Conversation.user_id)
+        )
+    ).all()
+    return {
+        row[0]: {
+            "last_message_at": row[1],
+            "tokens_total": int(row[2]) + int(row[3]),
+            "estimated_cost_usd": _cost(int(row[2]), int(row[3])),
+        }
+        for row in rows
     }

@@ -12,12 +12,15 @@ export interface Profile {
   activity_level: string | null;
   goal: string | null;
   timezone: string | null;
+  reminders_enabled: boolean;
   dietary_restrictions: string[];
   allergies: string[];
   target_calories: number | null;
   target_protein_g: number | null;
   target_carbs_g: number | null;
   target_fat_g: number | null;
+  target_fiber_g: number | null;
+  target_water_ml: number | null;
 }
 
 export interface Macros {
@@ -25,6 +28,7 @@ export interface Macros {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  fiber_g: number;
 }
 
 export interface DailySummary {
@@ -33,6 +37,9 @@ export interface DailySummary {
   totals: Macros;
   targets: Macros | null;
   remaining: Macros | null;
+  water_ml: number;
+  water_target_ml: number | null;
+  water_remaining_ml: number | null;
   meals: Meal[];
 }
 
@@ -44,6 +51,7 @@ export interface Meal {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  fiber_g: number | null;
 }
 
 export interface HistoryPoint {
@@ -52,11 +60,18 @@ export interface HistoryPoint {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  fiber_g: number;
+  water_ml: number;
 }
 
 export interface WeightPoint {
   logged_at: string;
   weight_kg: number;
+}
+
+export interface WaterPoint {
+  logged_at: string;
+  amount_ml: number;
 }
 
 export interface DietPlanItem {
@@ -70,6 +85,7 @@ export interface DietPlanItem {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  fiber_g: number | null;
   status: string;
   source: string;
 }
@@ -78,6 +94,16 @@ export interface Note {
   id: number;
   category: string;
   content: string;
+  source: string;
+}
+
+export interface Reminder {
+  id: number;
+  type: "meal" | "water" | "weight" | "news" | "custom";
+  message: string | null;
+  time: string;
+  days_of_week: number[];
+  enabled: boolean;
   source: string;
 }
 

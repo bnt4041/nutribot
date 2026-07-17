@@ -1,5 +1,7 @@
 """Authenticated client dashboard endpoints (self-service, JWT-protected)."""
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,7 @@ from app.models.conversation import Conversation, Message
 from app.models.enums import DietItemStatus
 from app.models.nutrition_profile import NutritionProfile
 from app.models.user import User
+from app.models.water_log import WaterLog
 from app.models.weight_log import WeightLog
 from app.schemas.me import (
     ConversationOut,
@@ -21,9 +24,15 @@ from app.schemas.me import (
     NoteOut,
     ProfileOut,
     ProfileUpdateIn,
+    ReminderCreate,
+    ReminderOut,
+    ReminderUpdate,
+    WaterLogCreate,
+    WaterPointOut,
     WeightPointOut,
 )
-from app.services import preferences, profile as profile_service
+from app.services import preferences, profile as profile_service, reminders as reminders_service
+from app.services.reminders import ReminderValidationError
 from app.services.nutrition import diet_plan, tracking
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -48,12 +57,15 @@ def _profile_out(user: User, p: NutritionProfile | None) -> ProfileOut:
         activity_level=p.activity_level.value if p and p.activity_level else None,
         goal=p.goal.value if p and p.goal else None,
         timezone=p.timezone if p else None,
+        reminders_enabled=p.reminders_enabled if p else False,
         dietary_restrictions=p.dietary_restrictions if p else [],
         allergies=p.allergies if p else [],
         target_calories=p.target_calories if p else None,
         target_protein_g=_num(p.target_protein_g) if p else None,
         target_carbs_g=_num(p.target_carbs_g) if p else None,
         target_fat_g=_num(p.target_fat_g) if p else None,
+        target_fiber_g=_num(p.target_fiber_g) if p else None,
+        target_water_ml=p.target_water_ml if p else None,
     )
 
 
@@ -126,6 +138,34 @@ async def my_weight(
         .order_by(WeightLog.logged_at)
     )
     return list(result.scalars().all())
+
+
+@router.get("/water", response_model=list[WaterPointOut])
+async def my_water(
+    days: int = Query(default=14, ge=1, le=90),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[WaterLog]:
+    """Water intake history for the current user."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.execute(
+        select(WaterLog)
+        .where(WaterLog.user_id == user.id, WaterLog.logged_at >= since)
+        .order_by(WaterLog.logged_at)
+    )
+    return list(result.scalars().all())
+
+
+@router.post("/water", status_code=status.HTTP_201_CREATED)
+async def add_water(
+    payload: WaterLogCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Log a quick water intake entry (e.g. a glass or bottle) from the dashboard."""
+    result = await tracking.log_water(db, user, amount_ml=payload.amount_ml)
+    await db.commit()
+    return result
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
@@ -273,5 +313,71 @@ async def delete_note(
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
     await preferences.delete_note(db, note)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Reminders (avisos y recordatorios) -------------------------------------
+
+
+@router.get("/reminders", response_model=list[ReminderOut])
+async def my_reminders(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[ReminderOut]:
+    """The current user's reminders (meal/water/weight nudges + custom ones)."""
+    items = await reminders_service.list_reminders(db, user)
+    return [ReminderOut(**reminders_service.reminder_to_dict(r)) for r in items]
+
+
+@router.post("/reminders", response_model=ReminderOut, status_code=status.HTTP_201_CREATED)
+async def create_reminder(
+    payload: ReminderCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReminderOut:
+    try:
+        reminder = await reminders_service.create_reminder(
+            db, user, source="user", **payload.model_dump()
+        )
+    except ReminderValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await db.commit()
+    return ReminderOut(**reminders_service.reminder_to_dict(reminder))
+
+
+@router.patch("/reminders/{reminder_id}", response_model=ReminderOut)
+async def update_reminder(
+    reminder_id: int,
+    payload: ReminderUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReminderOut:
+    reminder = await reminders_service.get_reminder(db, user, reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    try:
+        reminder = await reminders_service.update_reminder(
+            db, reminder, **payload.model_dump(exclude_unset=True)
+        )
+    except ReminderValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    await db.commit()
+    return ReminderOut(**reminders_service.reminder_to_dict(reminder))
+
+
+@router.delete("/reminders/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_reminder(
+    reminder_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    reminder = await reminders_service.get_reminder(db, user, reminder_id)
+    if reminder is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    await reminders_service.delete_reminder(db, reminder)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

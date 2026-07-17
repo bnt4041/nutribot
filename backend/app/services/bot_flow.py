@@ -3,7 +3,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.user import User
 from app.schemas.bot import BotButton, BotReply
 from app.services import onboarding
 from app.services.chat import get_or_create_user, handle_message
@@ -117,10 +116,6 @@ async def handle_update(
     if action == "start":
         return _with_profile_button(BotReply(text=WELCOME_BACK))
 
-    # ── Photo analysis ─────────────────────────────────────────────────
-    if image_base64:
-        return await _handle_photo(db, user, image_base64, image_mime, text)
-
     start_new = action == "nueva"
     user_text = text or "Hola"
     _, answer = await handle_message(
@@ -129,26 +124,8 @@ async def handle_update(
         text=user_text,
         full_name=full_name,
         start_new=start_new,
+        image_base64=image_base64,
+        image_mime=image_mime,
     )
     prefix = "🆕 Nueva conversación iniciada.\n\n" if start_new else ""
     return _with_profile_button(BotReply(text=prefix + answer))
-
-
-async def _handle_photo(
-    db: AsyncSession,
-    user: User,
-    image_base64: str,
-    image_mime: str | None,
-    caption: str | None,
-) -> BotReply:
-    """Analyze a food photo with the AI vision model and optionally log it."""
-    from app.services.chat import handle_food_photo
-
-    _, answer = await handle_food_photo(
-        db,
-        user=user,
-        image_base64=image_base64,
-        image_mime=image_mime or "image/jpeg",
-        caption=caption,
-    )
-    return _with_profile_button(BotReply(text=answer))

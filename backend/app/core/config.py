@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Gemini Vision (food photo analysis — free tier: 1500 img/day)
     gemini_api_key: str = Field(default="")
-    gemini_vision_model: str = Field(default="gemini-2.0-flash")
+    gemini_vision_model: str = Field(default="gemini-flash-latest")
 
     # How many past messages to include as context per DeepSeek call.
     chat_history_limit: int = Field(default=20)
@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     login_code_minutes: int = Field(default=10)
     # Public URL of the client dashboard (shown by the bot on /login).
     dashboard_client_url: str = Field(default="http://localhost:5173")
+
+    # Telegram (used by scripts/send_reminders.py to push notifications; the
+    # bot process itself has its own copy in bot/config.py).
+    telegram_bot_token: str = Field(default="")
     # Comma-separated list of allowed CORS origins for the dashboards.
     cors_origins: str = Field(
         default="http://localhost:5173,http://localhost:5174"

@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Note, Profile as ProfileType } from "../types";
+import { Note, Profile as ProfileType, Reminder } from "../types";
 
 const GOAL_ES: Record<string, string> = {
   lose: "Perder grasa",
@@ -25,6 +25,15 @@ const NOTE_CATEGORY_ES: Record<string, string> = {
   habit: "Hábito",
   other: "Otro",
 };
+
+const REMINDER_TYPE_ES: Record<string, string> = {
+  meal: "🍽️ Registrar comidas",
+  water: "💧 Beber agua",
+  weight: "⚖️ Pesarse",
+  news: "📰 Noticias de nutrición",
+  custom: "🔔 Personalizado",
+};
+const DAYS_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -85,12 +94,23 @@ export default function Profile() {
   const [newNote, setNewNote] = useState("");
   const [newCategory, setNewCategory] = useState("dislike");
 
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [newReminderType, setNewReminderType] = useState("meal");
+  const [newReminderTime, setNewReminderTime] = useState("09:00");
+  const [newReminderMessage, setNewReminderMessage] = useState("");
+  const [newReminderDays, setNewReminderDays] = useState<number[]>([]);
+  const [reminderError, setReminderError] = useState<string | null>(null);
+
   useEffect(() => {
     api
       .get<ProfileType>("/me")
       .then((r) => setProfile(r.data))
       .catch(() => setError(true));
     api.get<Note[]>("/me/notes").then((r) => setNotes(r.data)).catch(() => {});
+    api
+      .get<Reminder[]>("/me/reminders")
+      .then((r) => setReminders(r.data))
+      .catch(() => {});
   }, []);
 
   if (error) return <p className="text-red-600">No se pudo cargar el perfil.</p>;
@@ -151,6 +171,48 @@ export default function Profile() {
   const deleteNote = async (id: number) => {
     await api.delete(`/me/notes/${id}`);
     setNotes((n) => n.filter((x) => x.id !== id));
+  };
+
+  const toggleReminders = async () => {
+    const { data } = await api.patch<ProfileType>("/me", {
+      reminders_enabled: !p.reminders_enabled,
+    });
+    setProfile(data);
+  };
+
+  const toggleDay = (day: number) => {
+    setNewReminderDays((days) =>
+      days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort(),
+    );
+  };
+
+  const addReminder = async () => {
+    setReminderError(null);
+    try {
+      const { data } = await api.post<Reminder>("/me/reminders", {
+        type: newReminderType,
+        time: newReminderTime,
+        message: newReminderType === "custom" ? newReminderMessage.trim() : undefined,
+        days_of_week: newReminderDays,
+      });
+      setReminders((r) => [...r, data]);
+      setNewReminderMessage("");
+      setNewReminderDays([]);
+    } catch (e: any) {
+      setReminderError(e?.response?.data?.detail ?? "No se pudo crear el recordatorio.");
+    }
+  };
+
+  const toggleReminderEnabled = async (reminder: Reminder) => {
+    const { data } = await api.patch<Reminder>(`/me/reminders/${reminder.id}`, {
+      enabled: !reminder.enabled,
+    });
+    setReminders((r) => r.map((x) => (x.id === reminder.id ? data : x)));
+  };
+
+  const deleteReminder = async (id: number) => {
+    await api.delete(`/me/reminders/${id}`);
+    setReminders((r) => r.filter((x) => x.id !== id));
   };
 
   const deleteAccount = async () => {
@@ -289,6 +351,8 @@ export default function Profile() {
             <Row label="💪 Proteína" value={p.target_protein_g ? `${p.target_protein_g} g` : "—"} />
             <Row label="🍚 Carbohidratos" value={p.target_carbs_g ? `${p.target_carbs_g} g` : "—"} />
             <Row label="🧈 Grasas" value={p.target_fat_g ? `${p.target_fat_g} g` : "—"} />
+            <Row label="🌾 Fibra" value={p.target_fiber_g ? `${p.target_fiber_g} g` : "—"} />
+            <Row label="💧 Agua" value={p.target_water_ml ? `${(p.target_water_ml / 1000).toFixed(1)} L` : "—"} />
           </section>
 
           {/* Preferences */}
@@ -349,6 +413,96 @@ export default function Profile() {
           />
           <button onClick={addNote} className="btn-primary whitespace-nowrap">➕ Añadir</button>
         </div>
+      </section>
+
+      {/* Notifications: system reminders + custom ones */}
+      <section className="card">
+        <div className="card-header items-start justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🔔</span>
+            <div>
+              <h2 className="font-bold text-gray-800">Notificaciones</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Avisos y recordatorios por Telegram. También puedes pedírselos al bot.
+              </p>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-gray-500">Activadas</span>
+            <input type="checkbox" checked={p.reminders_enabled} onChange={toggleReminders} />
+          </label>
+        </div>
+
+        {reminders.length === 0 ? (
+          <p className="py-3 text-sm text-gray-400">Todavía no tienes recordatorios.</p>
+        ) : (
+          <ul className="space-y-2">
+            {reminders.map((r) => (
+              <li key={r.id} className="flex items-center justify-between rounded-xl bg-gray-50/80 px-4 py-2.5 text-sm transition-colors hover:bg-gray-100">
+                <div className="flex items-center gap-3">
+                  <span className="badge-gray text-[11px]">
+                    {REMINDER_TYPE_ES[r.type] ?? r.type}
+                  </span>
+                  <span className="font-semibold text-gray-800">{r.time}</span>
+                  <span className="text-xs text-gray-400">
+                    {r.days_of_week.length === 0
+                      ? "todos los días"
+                      : r.days_of_week.map((d) => DAYS_SHORT[d]).join(", ")}
+                  </span>
+                  <span className="text-gray-700">{r.message}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1 text-xs text-gray-500">
+                    <input type="checkbox" checked={r.enabled} onChange={() => toggleReminderEnabled(r)} />
+                    activo
+                  </label>
+                  <button onClick={() => deleteReminder(r.id)} className="btn-danger text-xs">
+                    🗑️ Eliminar
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {reminderError && (
+          <p className="mt-2 text-sm font-medium text-red-600">⚠️ {reminderError}</p>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <select className="input-field w-48" value={newReminderType} onChange={(e) => setNewReminderType(e.target.value)}>
+            {Object.entries(REMINDER_TYPE_ES).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+          <input type="time" className="input-field w-32" value={newReminderTime} onChange={(e) => setNewReminderTime(e.target.value)} />
+          {newReminderType === "custom" && (
+            <input
+              className="input-field flex-1"
+              placeholder="Ej. Tómate la vitamina"
+              value={newReminderMessage}
+              onChange={(e) => setNewReminderMessage(e.target.value)}
+            />
+          )}
+          <div className="flex gap-1">
+            {DAYS_SHORT.map((label, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => toggleDay(i)}
+                className={`h-8 w-8 rounded-lg text-xs font-semibold transition-colors ${
+                  newReminderDays.includes(i)
+                    ? "bg-emerald-500 text-white"
+                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={addReminder} className="btn-primary whitespace-nowrap">➕ Añadir</button>
+        </div>
+        <p className="mt-2 text-xs text-gray-400">Sin marcar ningún día se repite a diario.</p>
       </section>
 
       {/* Danger zone */}

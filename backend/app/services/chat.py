@@ -13,9 +13,9 @@ from app.models.user import User
 from app.services.deepseek.client import ChatResult, deepseek_client
 from app.services.deepseek.format import sanitize_for_telegram
 from app.services.deepseek.prompts import build_system_prompt
-from app.services.deepseek.tools import FOOD_TOOLS, make_food_tool_executor
+from app.services.deepseek.tools import FOOD_TOOLS, PHOTO_TOOL, make_food_tool_executor
 from app.services.nutrition import diet_plan
-from app.services import preferences
+from app.services import preferences, reminders as reminders_service
 from app.services.rag.retrieval import build_context_block, retrieve
 
 logger = logging.getLogger(__name__)
@@ -73,14 +73,29 @@ async def _load_history(
     return [{"role": m.role.value, "content": m.content} for m in recent]
 
 
+def _format_photo_context(history: list[dict[str, str]], limit: int = 6) -> str:
+    """Recent turns as plain text, for Gemini's prompt (not DeepSeek's)."""
+    recent = [m for m in history if m["role"] in ("user", "assistant")][-limit:]
+    speaker = {"user": "Usuario", "assistant": "Asistente"}
+    return "\n".join(f"{speaker[m['role']]}: {m['content']}" for m in recent)
+
+
 async def handle_message(
     db: AsyncSession,
     telegram_id: int,
-    text: str,
+    text: str | None,
     full_name: str | None = None,
     start_new: bool = False,
+    image_base64: str | None = None,
+    image_mime: str | None = None,
 ) -> tuple[int, str]:
     """Full turn: persist user message, call DeepSeek, persist reply.
+
+    If ``image_base64`` is set, DeepSeek is given an extra tool
+    (``analyze_food_photo``) and forced to call it first: DeepSeek asks
+    Gemini Vision to interpret the photo (with the recent conversation as
+    context) and then writes the actual reply from that result — the vision
+    model never talks to the user directly.
 
     Returns (conversation_id, assistant_reply).
     """
@@ -88,11 +103,12 @@ async def handle_message(
     conversation = await get_or_create_conversation(db, user, start_new)
 
     # Persist the incoming user message first so it is part of the history.
+    stored_text = f"📸 [Foto]{' — ' + text if text else ''}" if image_base64 else (text or "Hola")
     db.add(
         Message(
             conversation_id=conversation.id,
             role=MessageRole.USER,
-            content=text,
+            content=stored_text,
         )
     )
     await db.flush()
@@ -103,26 +119,52 @@ async def handle_message(
     profile = profile_result.scalar_one_or_none()
     notes = await preferences.list_notes(db, user)
     diet_items = await diet_plan.list_items(db, user)
+    user_reminders = await reminders_service.list_reminders(db, user)
 
-    # RAG: retrieve relevant knowledge for this message and inject it as context.
-    system_prompt = build_system_prompt(profile, notes, diet_items)
-    try:
-        chunks = await retrieve(db, text)
-        context_block = build_context_block(chunks)
-        if context_block:
-            system_prompt += context_block
-    except Exception:  # noqa: BLE001 - retrieval must never break the chat
-        logger.exception("RAG retrieval failed; continuing without context")
+    system_prompt = build_system_prompt(profile, notes, diet_items, user_reminders)
 
     history = await _load_history(db, conversation.id)
+
+    if image_base64:
+        system_prompt += (
+            "\n\nEl usuario acaba de enviar una foto. Llama primero a "
+            "analyze_food_photo para interpretarla antes de responder; no "
+            "asumas su contenido sin comprobarlo."
+        )
+        tools = [*FOOD_TOOLS, PHOTO_TOOL]
+        tool_executor = make_food_tool_executor(
+            db,
+            user,
+            image_base64=image_base64,
+            image_mime=image_mime,
+            # Context for Gemini's prompt: what was said before this photo,
+            # excluding the placeholder message just persisted above.
+            conversation_context=_format_photo_context(history[:-1]),
+        )
+        initial_tool_choice: str | dict = {
+            "type": "function",
+            "function": {"name": "analyze_food_photo"},
+        }
+    else:
+        # RAG: retrieve relevant knowledge for this message and inject it as context.
+        try:
+            chunks = await retrieve(db, text or "")
+            context_block = build_context_block(chunks)
+            if context_block:
+                system_prompt += context_block
+        except Exception:  # noqa: BLE001 - retrieval must never break the chat
+            logger.exception("RAG retrieval failed; continuing without context")
+        tools = FOOD_TOOLS
+        tool_executor = make_food_tool_executor(db, user)
+        initial_tool_choice = "auto"
+
     messages = [
         {"role": "system", "content": system_prompt},
         *history,
     ]
 
-    tool_executor = make_food_tool_executor(db, user)
     result: ChatResult = await deepseek_client.chat_with_tools(
-        messages, FOOD_TOOLS, tool_executor
+        messages, tools, tool_executor, initial_tool_choice=initial_tool_choice
     )
     reply = sanitize_for_telegram(result.content)
 
@@ -133,63 +175,6 @@ async def handle_message(
             content=reply,
             tokens_prompt=result.tokens_prompt,
             tokens_completion=result.tokens_completion,
-        )
-    )
-    await db.commit()
-
-    return conversation.id, reply
-
-
-async def handle_food_photo(
-    db: AsyncSession,
-    user: User,
-    image_base64: str,
-    image_mime: str,
-    caption: str | None = None,
-) -> tuple[int, str]:
-    """Analyze a food photo with vision AI and return the analysis.
-
-    Does NOT auto-log — the AI response invites the user to confirm.
-    Returns (conversation_id, assistant_reply).
-    """
-    conversation = Conversation(user_id=user.id)
-    db.add(conversation)
-    await db.flush()
-
-    # Build user message with image
-    user_text = caption or "¿Qué comida hay en esta foto? Analízala."
-    db.add(
-        Message(
-            conversation_id=conversation.id,
-            role=MessageRole.USER,
-            content=f"📸 [Foto de comida]{' — ' + caption if caption else ''}",
-        )
-    )
-    await db.flush()
-
-    # Call Gemini Vision (free tier) for food photo analysis
-    from app.services.deepseek.format import sanitize_for_telegram
-    from app.services.deepseek.vision import analyze_food_image
-
-    tokens_prompt = 0
-    tokens_completion = 0
-    try:
-        reply = await analyze_food_image(image_base64, image_mime)
-        reply = sanitize_for_telegram(reply)
-    except Exception:
-        logger.exception("Food photo analysis failed")
-        reply = (
-            "📸 No he podido analizar la foto en este momento. "
-            "Puedes describirme la comida y te ayudo igualmente."
-        )
-
-    db.add(
-        Message(
-            conversation_id=conversation.id,
-            role=MessageRole.ASSISTANT,
-            content=reply,
-            tokens_prompt=tokens_prompt,
-            tokens_completion=tokens_completion,
         )
     )
     await db.commit()

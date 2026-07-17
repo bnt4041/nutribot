@@ -46,6 +46,7 @@ class MealLog(Base, TimestampMixin):
     protein_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     carbs_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     fat_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    fiber_g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
 
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True

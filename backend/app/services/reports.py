@@ -137,6 +137,13 @@ def generate_report_pdf(
     pdf._macro_bar("Proteina", totals.get("protein_g", 0), targets.get("protein_g"), "g")
     pdf._macro_bar("Carbohidratos", totals.get("carbs_g", 0), targets.get("carbs_g"), "g")
     pdf._macro_bar("Grasas", totals.get("fat_g", 0), targets.get("fat_g"), "g")
+    pdf._macro_bar("Fibra", totals.get("fiber_g", 0), targets.get("fiber_g"), "g")
+    pdf._macro_bar(
+        "Agua",
+        daily_summary.get("water_ml", 0),
+        daily_summary.get("water_target_ml"),
+        "ml",
+    )
     pdf.ln(4)
 
     pdf._section("Plan de dieta")
@@ -168,6 +175,8 @@ def generate_report_pdf(
                 macros.append(f"C {float(item.carbs_g):.0f}g")
             if item.fat_g:
                 macros.append(f"G {float(item.fat_g):.0f}g")
+            if item.fiber_g:
+                macros.append(f"Fibra {float(item.fiber_g):.0f}g")
             if macros:
                 pdf.set_x(pdf.l_margin + 10)
                 pdf._txt("", 8, GRAY)

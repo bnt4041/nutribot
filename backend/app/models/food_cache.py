@@ -24,6 +24,7 @@ class FoodCache(Base):
     protein_100g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     carbs_100g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     fat_100g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    fiber_100g: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
 
     # Raw Open Food Facts payload for anything we didn't normalize.
     raw_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

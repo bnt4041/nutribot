@@ -23,6 +23,7 @@ def _row_to_dict(row: FoodCache) -> dict:
         "protein_100g": float(row.protein_100g) if row.protein_100g is not None else None,
         "carbs_100g": float(row.carbs_100g) if row.carbs_100g is not None else None,
         "fat_100g": float(row.fat_100g) if row.fat_100g is not None else None,
+        "fiber_100g": float(row.fiber_100g) if row.fiber_100g is not None else None,
         "url": product_url(row.barcode),
         "image_url": image_url,
     }
@@ -50,6 +51,7 @@ async def _upsert(db: AsyncSession, normalized: dict, raw: dict) -> FoodCache:
     row.protein_100g = normalized["protein_100g"]
     row.carbs_100g = normalized["carbs_100g"]
     row.fat_100g = normalized["fat_100g"]
+    row.fiber_100g = normalized["fiber_100g"]
     row.raw_data = raw
     row.fetched_at = datetime.now(timezone.utc)
     await db.flush()

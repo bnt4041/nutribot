@@ -61,5 +61,7 @@ class NutritionProfile(Base, TimestampMixin):
     )
     target_carbs_g: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
     target_fat_g: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    target_fiber_g: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    target_water_ml: Mapped[int | None] = mapped_column(nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="profile")
